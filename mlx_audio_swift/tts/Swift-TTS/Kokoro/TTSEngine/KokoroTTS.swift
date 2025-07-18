@@ -516,7 +516,7 @@ public class KokoroTTS {
 
     // Process each sentence in sequence with better performance
     DispatchQueue.global(qos: .userInitiated).async {
-      self.voice = nil
+      // Don't clear the voice as it may be needded in subsequent calls
 
       // Use a separate autorelease pool for each sentence to release memory faster
       for (_, sentence) in sentences.enumerated() {

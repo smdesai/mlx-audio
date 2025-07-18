@@ -12,16 +12,18 @@ struct ContentView: View {
     @State private var speed = 1.0
     @State public var text = ""
     @State private var showAlert = false
-  
+    @State private var isStreamingMode = false
+    @State private var streamingTimer: Timer?
+
     @FocusState private var isTextEditorFocused: Bool
     @ObservedObject var viewModel: KokoroTTSModel
     @StateObject private var speakerModel = SpeakerViewModel()
-    
+
     var body: some View {
         NavigationStack {
             ZStack {
                 backgroundView
-                
+
                 ScrollView(showsIndicators: false) {
                     VStack(spacing: 16) {
                         VStack(alignment: .leading, spacing: 8) {
@@ -33,10 +35,11 @@ struct ContentView: View {
                                 .frame(maxWidth: .infinity)
                             }
                         }
-                        
+
+                        streamingModeToggle
                         speedControlView
                         textInputView
-                        
+
                         actionButtonsView
                     }
                     .padding([.horizontal, .bottom])
@@ -74,18 +77,18 @@ struct ContentView: View {
             speakerModel.isGenerating = newValue
         }
     }
-    
+
     private var backgroundView: some View {
         Color(.systemBackground)
             .ignoresSafeArea()
     }
-    
+
     private func compactSpeakerView(selectedSpeakerId: Binding<Int>, title: String) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(title)
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
-            
+
             Menu {
                 ForEach(speakerModel.speakers) { speaker in
                     Button(action: {
@@ -121,7 +124,19 @@ struct ContentView: View {
             .disabled(viewModel.generationInProgress)
         }
     }
-    
+
+    private var streamingModeToggle: some View {
+        HStack {
+            Text("Streaming Mode")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+            Spacer()
+            Toggle("", isOn: $isStreamingMode)
+                .disabled(viewModel.generationInProgress || viewModel.isStreaming)
+        }
+        .padding(.vertical, 4)
+    }
+
     private var speedControlView: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
@@ -133,13 +148,13 @@ struct ContentView: View {
                     .font(.subheadline)
                     .bold()
             }
-            
+
             Slider(value: $speed, in: 0.5...2.0, step: 0.1)
                 .tint(.accentColor)
                 .disabled(viewModel.generationInProgress)
         }
     }
-    
+
     private var textInputView: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
@@ -147,7 +162,7 @@ struct ContentView: View {
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
-            
+
             ZStack(alignment: .topLeading) {
                 TextEditor(text: $text)
                     .font(.body)
@@ -166,7 +181,7 @@ struct ContentView: View {
                             isTextEditorFocused = true
                         }
                     }
-                
+
                 if text.isEmpty {
                     Text("Enter your text here...")
                         .foregroundStyle(.secondary)
@@ -177,7 +192,7 @@ struct ContentView: View {
             }
         }
     }
-    
+
     private var actionButtonsView: some View {
         HStack(spacing: 12) {
             // generatge button
@@ -186,22 +201,26 @@ struct ContentView: View {
                     dismissKeyboard()
                     isTextEditorFocused = false
                 }
-                
-                // Prepare text and speaker
-                let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
-                let speaker = speakerModel.getPrimarySpeaker().first!
-                
-                // Set memory constraints for MLX and start generation
-                MLX.GPU.set(cacheLimit: 20 * 1024 * 1024)
-                viewModel.say(t, TTSVoice.fromIdentifier(speaker.name) ?? .afHeart, speed: Float(speed))
+
+                if isStreamingMode {
+                    startStreaming()
+                } else {
+                    // Prepare text and speaker
+                    let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
+                    let speaker = speakerModel.getPrimarySpeaker().first!
+
+                    // Set memory constraints for MLX and start generation
+                    MLX.GPU.set(cacheLimit: 20 * 1024 * 1024)
+                    viewModel.say(t, TTSVoice.fromIdentifier(speaker.name) ?? .afHeart, speed: Float(speed))
+                }
             } label: {
                 HStack {
-                    if viewModel.generationInProgress {
+                    if viewModel.generationInProgress || viewModel.isStreaming {
                         ProgressView()
                             .controlSize(.small)
-                        Text("Generating...")
+                        Text(viewModel.isStreaming ? "Streaming..." : "Generating...")
                     } else {
-                        Text("Generate")
+                        Text(isStreamingMode ? "Start Stream" : "Generate")
                     }
                 }
                 .frame(maxWidth: .infinity)
@@ -210,11 +229,15 @@ struct ContentView: View {
             .buttonStyle(.borderedProminent)
             .controlSize(.regular)
             .frame(maxWidth: .infinity, minHeight: 44)
-            .disabled(viewModel.generationInProgress || text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-            
+            .disabled(viewModel.generationInProgress || viewModel.isStreaming || text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
             // Stop button
             Button {
-                viewModel.stopPlayback()
+                if viewModel.isStreaming {
+                    stopStreaming()
+                } else {
+                    viewModel.stopPlayback()
+                }
             } label: {
                 HStack {
                     Image(systemName: "stop.fill")
@@ -227,8 +250,50 @@ struct ContentView: View {
             .controlSize(.regular)
             .frame(maxWidth: .infinity, minHeight: 44)
             .tint(.red)
-            .disabled(!viewModel.isAudioPlaying)
+            .disabled(!viewModel.isAudioPlaying && !viewModel.isStreaming)
         }
+    }
+
+    // MARK: - Streaming Methods
+
+    private func startStreaming() {
+        let fullText = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !fullText.isEmpty else {
+            return
+        }
+
+        let speaker = speakerModel.getPrimarySpeaker().first!
+        let voice = TTSVoice.fromIdentifier(speaker.name) ?? .afHeart
+
+        MLX.GPU.set(cacheLimit: 20 * 1024 * 1024)
+
+        viewModel.startStreaming(voice: voice, speed: Float(speed))
+
+        // Simulate text arrival in chunks
+        var currentIndex = fullText.startIndex
+        streamingTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { timer in
+            if currentIndex >= fullText.endIndex {
+                // End streaming when all text is sent
+                viewModel.endStreaming()
+                timer.invalidate()
+                // Don't set isStreaming = false here - let the model handle it
+                return
+            }
+
+            // Send next chunk (5-20 characters at a time)
+            let chunkSize = Int.random(in: 5...20)
+            let endIndex = fullText.index(currentIndex, offsetBy: chunkSize, limitedBy: fullText.endIndex) ?? fullText.endIndex
+            let chunk = String(fullText[currentIndex..<endIndex])
+
+            viewModel.addStreamingText(chunk)
+            currentIndex = endIndex
+        }
+    }
+
+    private func stopStreaming() {
+        streamingTimer?.invalidate()
+        streamingTimer = nil
+        viewModel.stopStreaming()
     }
 }
 
@@ -334,11 +399,11 @@ class SpeakerViewModel: ObservableObject {
         Speaker(id: 51, name: "zm_yunxia"),
         Speaker(id: 52, name: "zm_yunyang"),
     ]
-    
+
    func getPrimarySpeaker() -> [Speaker] {
         speakers.filter { $0.id == selectedSpeakerId }
     }
-    
+
     func getSecondarySpeaker() -> [Speaker] {
         speakers.filter { $0.id == selectedSpeakerId2 }
     }

@@ -14,7 +14,7 @@ struct ContentView: View {
 
     @State private var sayThis : String = "Hello Everybody"
     @State private var status : String = ""
-    
+
     private var availableProviders = ["kokoro", "orpheus"]
     @State private var chosenProvider : String = "kokoro"
     @State private var availableVoices: [String] = TTSVoice.allCases.map { $0.rawValue }
@@ -34,7 +34,7 @@ struct ContentView: View {
                     Text(provider.capitalized)
                 }
             }
-            .onChange(of: chosenProvider) { newProvider in
+            .onChange(of: chosenProvider) { _, newProvider in
                 if newProvider == "orpheus" {
                     availableVoices = OrpheusVoice.allCases.map { $0.rawValue }
                     chosenVoice = availableVoices.first ?? "dan"
@@ -60,7 +60,7 @@ struct ContentView: View {
             .padding(.top, 0)
 
             TextField("Enter text", text: $sayThis).padding()
-            
+
             Button(action: {
                 Task {
                     status = "Generating..."
@@ -74,7 +74,7 @@ struct ContentView: View {
                         } else {
                             status = "Invalid Kokoro voice selected"
                         }
-                        
+
                     } else if chosenProvider == "orpheus" {
                         if orpheusTTSModel == nil {
                             orpheusTTSModel = OrpheusTTSModel()
@@ -86,7 +86,7 @@ struct ContentView: View {
                             status = "Invalid Orpheus voice selected"
                         }
                     }
-                    
+
                     status = "Done"
                 }
             }, label: {
