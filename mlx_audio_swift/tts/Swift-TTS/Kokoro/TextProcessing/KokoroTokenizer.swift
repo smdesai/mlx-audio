@@ -90,6 +90,7 @@ final class KokoroTokenizer {
     private var eSpeakEngine: ESpeakNGEngine
     private var currentLanguage: ESpeakNGEngine.LanguageDialect = .none
     private var isLexiconEnabled = false
+    private var phonemeCache: [String: String] = [:]
 
     // MARK: - Token Structure
 
@@ -529,8 +530,15 @@ final class KokoroTokenizer {
             }
         }
 
-        // Use espeak backend
-        return try eSpeakEngine.phonemize(text: lowerToken)
+        // Check phoneme cache first
+        if let cachedPhoneme = phonemeCache[lowerToken] {
+            return cachedPhoneme
+        }
+
+        // Use espeak backend and cache the result
+        let phoneme = try eSpeakEngine.phonemize(text: lowerToken)
+        phonemeCache[lowerToken] = phoneme
+        return phoneme
     }
 
     private func mergeTokens(_ tokens: [Token]) -> Token {
