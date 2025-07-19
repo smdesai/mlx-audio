@@ -14,48 +14,49 @@ struct ContentView: View {
     @State private var showAlert = false
     @State private var isStreamingMode = false
     @State private var streamingTimer: Timer?
+    @State private var showSettings = false
 
     @FocusState private var isTextEditorFocused: Bool
     @ObservedObject var viewModel: KokoroTTSModel
     @StateObject private var speakerModel = SpeakerViewModel()
+    
+    @Environment(\.colorScheme) var colorScheme
 
     var body: some View {
         NavigationStack {
             ZStack {
-                backgroundView
+                // Gradient background
+                LinearGradient(
+                    gradient: Gradient(colors: [
+                        Color(.systemBackground),
+                        Color(.systemBackground).opacity(0.95)
+                    ]),
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+                .ignoresSafeArea()
 
                 ScrollView(showsIndicators: false) {
-                    VStack(spacing: 16) {
-                        VStack(alignment: .leading, spacing: 8) {
-                            HStack(spacing: 12) {
-                                compactSpeakerView(
-                                    selectedSpeakerId: $speakerModel.selectedSpeakerId,
-                                    title: "Speaker"
-                                )
-                                .frame(maxWidth: .infinity)
-                            }
+                    VStack(spacing: 20) {
+                        // Header card
+                        headerCard
+                        
+                        VStack(spacing: 10) {
+                            // Speaker selection card
+                            speakerCard
+                            
+                            // Settings card
+                            settingsCard
+                            
+                            // Text input card
+                            textInputCard
+                            
+                            // Action buttons
+                            actionButtonsView
                         }
-
-                        streamingModeToggle
-                        speedControlView
-                        textInputView
-
-                        actionButtonsView
+                        .padding(.horizontal)
                     }
-                    .padding([.horizontal, .bottom])
-                }
-                .toolbar {
-                    ToolbarItem(placement: .principal) {
-                        VStack(spacing: 0) {
-                            HStack {
-                                Text("Kokoro")
-                                    .font(.title)
-                            }
-                            Text("Time to first audio sample: \(viewModel.audioGenerationTime > 0 ? String(format: "%.2f", viewModel.audioGenerationTime) : "--")s")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        }
-                    }
+                    .padding(.bottom, 20)
                 }
                 .scrollContentBackground(.hidden)
                 .alert("Empty Text", isPresented: $showAlert) {
@@ -72,31 +73,62 @@ struct ContentView: View {
                 }
             }
         }
+        .tint(.accentColor)
         // Sync viewModel.generationInProgress to speakerModel.isGenerating
         .onChange(of: viewModel.generationInProgress) { _, newValue in
             speakerModel.isGenerating = newValue
         }
     }
-
-    private var backgroundView: some View {
-        Color(.systemBackground)
-            .ignoresSafeArea()
+    
+    // MARK: - Header Card
+    
+    private var headerCard: some View {
+        VStack(spacing: 12) {
+            // Logo/Icon
+            Image(systemName: "waveform.circle.fill")
+                .font(.system(size: 60))
+                .foregroundStyle(.tint)
+                .symbolEffect(.pulse, isActive: viewModel.isAudioPlaying)
+            
+            Text("Kokoro TTS")
+                .font(.largeTitle)
+                .fontWeight(.bold)
+            
+            // Performance metric
+            HStack {
+                Image(systemName: "timer")
+                    .font(.caption)
+                Text("Time to first audio: \(viewModel.audioGenerationTime > 0 ? String(format: "%.2f", viewModel.audioGenerationTime) : "--")s")
+                    .font(.caption)
+            }
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
+            .background(
+                Capsule()
+                    .fill(Color(.tertiarySystemBackground))
+            )
+        }
+        .padding(.vertical)
     }
-
-    private func compactSpeakerView(selectedSpeakerId: Binding<Int>, title: String) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(title)
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-
+    
+    // MARK: - Speaker Card
+    
+    private var speakerCard: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Label("Voice Selection", systemImage: "person.wave.2")
+                .font(.headline)
+            
             Menu {
                 ForEach(speakerModel.speakers) { speaker in
                     Button(action: {
-                        selectedSpeakerId.wrappedValue = speaker.id
+                        withAnimation(.spring(response: 0.3)) {
+                            speakerModel.selectedSpeakerId = speaker.id
+                        }
                     }) {
                         HStack {
                             Text("\(speaker.flag) \(speaker.displayName)")
-                            if selectedSpeakerId.wrappedValue == speaker.id {
+                            if speakerModel.selectedSpeakerId == speaker.id {
                                 Image(systemName: "checkmark")
                             }
                         }
@@ -104,164 +136,320 @@ struct ContentView: View {
                 }
             } label: {
                 HStack {
-                    if let speaker = speakerModel.getSpeaker(id: selectedSpeakerId.wrappedValue) {
-                        Text(speaker.flag)
-                        Text(speaker.displayName)
-                            .lineLimit(1)
-                            .foregroundStyle(.primary)
+                    if let speaker = speakerModel.getSpeaker(id: speakerModel.selectedSpeakerId) {
+                        // Voice icon with flag
+                        ZStack {
+                            Circle()
+                                .fill(Color(.tertiarySystemBackground))
+                                .frame(width: 40, height: 40)
+                            Text(speaker.flag)
+                                .font(.title2)
+                        }
+                        
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(speaker.displayName)
+                                .font(.headline)
+                                .foregroundStyle(.primary)
+                            Text("Tap to change")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
                     }
+                    
                     Spacer()
-                    Image(systemName: "chevron.down")
-                        .font(.caption)
+                    
+                    Image(systemName: "chevron.down.circle.fill")
+                        .font(.title2)
                         .foregroundStyle(.secondary)
                 }
-                .padding(8)
+                .padding()
                 .background(
-                    RoundedRectangle(cornerRadius: 8)
-                        .fill(Color(.tertiarySystemBackground))
+                    RoundedRectangle(cornerRadius: 16)
+                        .fill(Color(.secondarySystemBackground))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 16)
+                        .stroke(Color(.separator), lineWidth: 0.5)
                 )
             }
             .disabled(viewModel.generationInProgress)
         }
+        .padding()
+        .background(
+            RoundedRectangle(cornerRadius: 20)
+                .fill(Color(.systemBackground))
+                .shadow(color: Color.black.opacity(0.05), radius: 10, y: 5)
+        )
     }
-
-    private var streamingModeToggle: some View {
-        VStack(spacing: 8) {
-            HStack {
-                Text("Streaming Mode")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                Spacer()
-                Toggle("", isOn: $isStreamingMode)
+    
+    // MARK: - Settings Card
+    
+    private var settingsCard: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            // Header with expandable button
+            Button(action: {
+                withAnimation(.spring(response: 0.3)) {
+                    showSettings.toggle()
+                }
+            }) {
+                HStack {
+                    Label("Settings", systemImage: "slider.horizontal.3")
+                        .font(.headline)
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .rotationEffect(.degrees(showSettings ? 90 : 0))
+                }
+            }
+            .foregroundStyle(.primary)
+            
+            if showSettings {
+                VStack(spacing: 20) {
+                    // Speed control
+                    VStack(alignment: .leading, spacing: 12) {
+                        HStack {
+                            Label("Speed", systemImage: "speedometer")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                            Spacer()
+                            Text(String(format: "%.1fx", speed))
+                                .font(.headline)
+                                .foregroundStyle(.tint)
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 4)
+                                .background(
+                                    Capsule()
+                                        .fill(Color(.tertiarySystemBackground))
+                                )
+                        }
+                        
+                        HStack(spacing: 8) {
+                            Image(systemName: "tortoise.fill")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            
+                            Slider(value: $speed, in: 0.5...2.0, step: 0.1)
+                                .tint(.accentColor)
+                            
+                            Image(systemName: "hare.fill")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        .disabled(viewModel.generationInProgress)
+                    }
+                    
+                    Divider()
+                    
+                    // Streaming mode toggle
+                    Toggle(isOn: $isStreamingMode) {
+                        HStack {
+                            Image(systemName: "dot.radiowaves.left.and.right")
+                                .foregroundStyle(.tint)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Streaming Mode")
+                                    .font(.subheadline)
+                                Text("Generate audio in real-time")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                    .tint(.accentColor)
                     .disabled(viewModel.generationInProgress || viewModel.isStreaming)
+                    
+                    // Legacy sentence split toggle
+                    Toggle(isOn: $viewModel.useLegacySentenceSplit) {
+                        HStack {
+                            Image(systemName: "text.line.first.and.arrowtriangle.forward")
+                                .foregroundStyle(.orange)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Legacy Sentence Split")
+                                    .font(.subheadline)
+                                Text("Use traditional tokenizer")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                    .tint(.orange)
+                    .disabled(viewModel.generationInProgress || viewModel.isStreaming)
+                }
+                .transition(.asymmetric(
+                    insertion: .opacity.combined(with: .move(edge: .top)),
+                    removal: .opacity.combined(with: .move(edge: .top))
+                ))
+            }
+        }
+        .padding()
+        .background(
+            RoundedRectangle(cornerRadius: 20)
+                .fill(Color(.systemBackground))
+                .shadow(color: Color.black.opacity(0.05), radius: 10, y: 5)
+        )
+    }
+    
+    // MARK: - Text Input Card
+    
+    private var textInputCard: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack {
+                Label("Text Input", systemImage: "text.quote")
+                    .font(.headline)
+                Spacer()
+                if !text.isEmpty {
+                    Text("\(text.count) characters")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
             
-            HStack {
-                Text("Legacy Sentence Split")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                Spacer()
-                Toggle("", isOn: $viewModel.useLegacySentenceSplit)
-                    .disabled(viewModel.generationInProgress || viewModel.isStreaming)
-            }
-        }
-        .padding(.vertical, 4)
-    }
-
-    private var speedControlView: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Text("Speed")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                Spacer()
-                Text(String(format: "%.1fx", speed))
-                    .font(.subheadline)
-                    .bold()
-            }
-
-            Slider(value: $speed, in: 0.5...2.0, step: 0.1)
-                .tint(.accentColor)
-                .disabled(viewModel.generationInProgress)
-        }
-    }
-
-    private var textInputView: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Text("Text Input")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-            }
-
             ZStack(alignment: .topLeading) {
                 TextEditor(text: $text)
                     .font(.body)
-                    .frame(minHeight: 120)
+                    .frame(minHeight: 150)
                     .scrollContentBackground(.hidden)
-                    .padding()
+                    .padding(12)
                     .background(
-                        RoundedRectangle(cornerRadius: 12)
-                            .fill(Color(.tertiarySystemBackground))
+                        RoundedRectangle(cornerRadius: 16)
+                            .fill(Color(.secondarySystemBackground))
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 16)
+                            .stroke(isTextEditorFocused ? Color.accentColor : Color(.separator), lineWidth: isTextEditorFocused ? 2 : 0.5)
                     )
                     .focused($isTextEditorFocused)
                     .disabled(viewModel.generationInProgress)
-                    .onTapGesture {
-                        // Explicitly focus the text editor when tapped
-                        if !isTextEditorFocused && !viewModel.generationInProgress {
-                            isTextEditorFocused = true
-                        }
-                    }
+                    .animation(.easeInOut(duration: 0.2), value: isTextEditorFocused)
 
-                if text.isEmpty {
-                    Text("Enter your text here...")
-                        .foregroundStyle(.secondary)
-                        .padding(.horizontal, 20)
-                        .padding(.top, 25)
-                        .allowsHitTesting(false)
+                if text.isEmpty && !isTextEditorFocused {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Enter your text here...")
+                            .foregroundStyle(.secondary)
+                        Text("Tip: Try different voices and speeds!")
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.top, 20)
+                    .allowsHitTesting(false)
                 }
             }
         }
+        .padding()
+        .background(
+            RoundedRectangle(cornerRadius: 20)
+                .fill(Color(.systemBackground))
+                .shadow(color: Color.black.opacity(0.05), radius: 10, y: 5)
+        )
     }
-
+    
+    // MARK: - Action Buttons
+    
     private var actionButtonsView: some View {
-        HStack(spacing: 12) {
-            // generatge button
-            Button {
-                if isTextEditorFocused {
-                    dismissKeyboard()
-                    isTextEditorFocused = false
-                }
-
-                if isStreamingMode {
-                    startStreaming()
-                } else {
-                    // Prepare text and speaker
-                    let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
-                    let speaker = speakerModel.getPrimarySpeaker().first!
-
-                    // Set memory constraints for MLX and start generation
-                    MLX.GPU.set(cacheLimit: 20 * 1024 * 1024)
-                    viewModel.say(t, TTSVoice.fromIdentifier(speaker.name) ?? .afHeart, speed: Float(speed))
-                }
-            } label: {
-                HStack {
-                    if viewModel.generationInProgress || viewModel.isStreaming {
-                        ProgressView()
-                            .controlSize(.small)
-                        Text(viewModel.isStreaming ? "Streaming..." : "Generating...")
+        Button {
+            withAnimation(.spring(response: 0.3)) {
+                if viewModel.generationInProgress || viewModel.isStreaming || viewModel.isAudioPlaying {
+                    // Stop action
+                    if viewModel.isStreaming {
+                        stopStreaming()
                     } else {
-                        Text(isStreamingMode ? "Start Stream" : "Generate")
+                        viewModel.stopPlayback()
+                    }
+                } else {
+                    // Generate action
+                    if isTextEditorFocused {
+                        dismissKeyboard()
+                        isTextEditorFocused = false
+                    }
+                    
+                    if isStreamingMode {
+                        startStreaming()
+                    } else {
+                        let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
+                        guard !t.isEmpty else {
+                            showAlert = true
+                            return
+                        }
+                        let speaker = speakerModel.getPrimarySpeaker().first!
+                        MLX.GPU.set(cacheLimit: 20 * 1024 * 1024)
+                        viewModel.say(t, TTSVoice.fromIdentifier(speaker.name) ?? .afHeart, speed: Float(speed))
                     }
                 }
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 10)
             }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.regular)
-            .frame(maxWidth: .infinity, minHeight: 44)
-            .disabled(viewModel.generationInProgress || viewModel.isStreaming || text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-
-            // Stop button
-            Button {
-                if viewModel.isStreaming {
-                    stopStreaming()
-                } else {
-                    viewModel.stopPlayback()
-                }
-            } label: {
-                HStack {
+        } label: {
+            HStack(spacing: 8) {
+                if viewModel.generationInProgress || viewModel.isStreaming {
+                    if viewModel.isAudioPlaying {
+                        Image(systemName: "stop.fill")
+                    } else {
+                        ProgressView()
+                            .controlSize(.small)
+                            .tint(.white)
+                    }
+                } else if viewModel.isAudioPlaying {
                     Image(systemName: "stop.fill")
-                    Text("Stop")
+                } else {
+                    Image(systemName: isStreamingMode ? "dot.radiowaves.left.and.right" : "play.fill")
                 }
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 10)
+                
+                Text(buttonText)
+                    .fontWeight(.semibold)
             }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.regular)
-            .frame(maxWidth: .infinity, minHeight: 44)
-            .tint(.red)
-            .disabled(!viewModel.isAudioPlaying && !viewModel.isStreaming)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 16)
+            .foregroundColor(.white)
+            .background(
+                RoundedRectangle(cornerRadius: 16)
+                    .fill(
+                        LinearGradient(
+                            gradient: Gradient(colors: buttonGradientColors),
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .shadow(color: buttonShadowColor, radius: 8, y: 4)
+            )
+        }
+        .padding(.leading, 16)
+        .padding(.trailing, 16)
+        .disabled(!buttonEnabled)
+        .opacity(buttonEnabled ? 1.0 : 0.6)
+        .animation(.easeInOut(duration: 0.2), value: viewModel.isAudioPlaying)
+    }
+    
+    // Helper computed properties for button state
+    private var buttonText: String {
+        if viewModel.isAudioPlaying || viewModel.isStreaming {
+            return "Stop"
+        } else if viewModel.generationInProgress {
+            return "Generating..."
+        } else if isStreamingMode {
+            return "Start Stream"
+        } else {
+            return "Generate"
+        }
+    }
+    
+    private var buttonGradientColors: [Color] {
+        if viewModel.isAudioPlaying || viewModel.isStreaming {
+            return [Color.red, Color.red.opacity(0.8)]
+        } else {
+            return [Color.accentColor, Color.accentColor.opacity(0.8)]
+        }
+    }
+    
+    private var buttonShadowColor: Color {
+        if viewModel.isAudioPlaying || viewModel.isStreaming {
+            return Color.red.opacity(0.3)
+        } else {
+            return Color.accentColor.opacity(0.3)
+        }
+    }
+    
+    private var buttonEnabled: Bool {
+        if viewModel.isAudioPlaying || viewModel.isStreaming {
+            return true // Always enabled when playing/streaming so user can stop
+        } else {
+            return !viewModel.generationInProgress && !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         }
     }
 
@@ -270,6 +458,7 @@ struct ContentView: View {
     private func startStreaming() {
         let fullText = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !fullText.isEmpty else {
+            showAlert = true
             return
         }
 
@@ -287,7 +476,6 @@ struct ContentView: View {
                 // End streaming when all text is sent
                 viewModel.endStreaming()
                 timer.invalidate()
-                // Don't set isStreaming = false here - let the model handle it
                 return
             }
 
@@ -308,19 +496,20 @@ struct ContentView: View {
     }
 }
 
+// MARK: - Speaker Model
+
 struct Speaker: Identifiable {
     let id: Int
     let name: String
 
     var flag: String {
         if name.lowercased() == "none" {
-            return "⚪️" // Empty/None speaker icon
+            return "⚪️"
         }
 
         guard name.count >= 2 else { return "🏳️" }
         let country = name.prefix(1)
 
-        // Determine country flag
         let countryFlag: String
         switch country {
         case "a": countryFlag = "🇺🇸" // USA
@@ -340,7 +529,7 @@ struct Speaker: Identifiable {
 
     var displayName: String {
         if name.lowercased() == "none" {
-            return "None" // Special case for None option
+            return "None"
         }
 
         guard name.count >= 2 else { return name }
@@ -350,12 +539,11 @@ struct Speaker: Identifiable {
 }
 
 class SpeakerViewModel: ObservableObject {
-    @Published var selectedSpeakerId: Int = 0
+    @Published var selectedSpeakerId: Int = 3 // Default to af_heart
     @Published var selectedSpeakerId2: Int = -1
     @Published var isGenerating: Bool = false
 
     let speakers: [Speaker] = [
-        Speaker(id: -1, name: "none"),
         Speaker(id: 0, name: "af_alloy"),
         Speaker(id: 1, name: "af_aoede"),
         Speaker(id: 2, name: "af_bella"),
