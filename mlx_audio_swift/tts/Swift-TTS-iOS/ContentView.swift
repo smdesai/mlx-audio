@@ -126,13 +126,24 @@ struct ContentView: View {
     }
 
     private var streamingModeToggle: some View {
-        HStack {
-            Text("Streaming Mode")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-            Spacer()
-            Toggle("", isOn: $isStreamingMode)
-                .disabled(viewModel.generationInProgress || viewModel.isStreaming)
+        VStack(spacing: 8) {
+            HStack {
+                Text("Streaming Mode")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Toggle("", isOn: $isStreamingMode)
+                    .disabled(viewModel.generationInProgress || viewModel.isStreaming)
+            }
+            
+            HStack {
+                Text("Legacy Sentence Split")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Toggle("", isOn: $viewModel.useLegacySentenceSplit)
+                    .disabled(viewModel.generationInProgress || viewModel.isStreaming)
+            }
         }
         .padding(.vertical, 4)
     }

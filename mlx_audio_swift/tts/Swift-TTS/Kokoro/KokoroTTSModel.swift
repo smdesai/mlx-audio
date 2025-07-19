@@ -13,6 +13,9 @@ public class KokoroTTSModel: ObservableObject {
     @Published public var isStreaming = false
     private var streamingVoice: TTSVoice?
     private var streamingSpeed: Float = 1.0
+    
+    // Sentence splitting mode
+    @Published public var useLegacySentenceSplit = false
 
     private var audioEngine: AVAudioEngine!
     private var playerNode: AVAudioPlayerNode!
@@ -300,7 +303,8 @@ public class KokoroTTSModel: ObservableObject {
             try kokoroTTSEngine.generateAudio(
                 voice: voice,
                 text: text,
-                speed: speed
+                speed: speed,
+                useLegacySentenceSplit: useLegacySentenceSplit
             ) { [weak self] audioBuffer in
                 guard let self = self else { return }
 
@@ -874,7 +878,8 @@ public class KokoroTTSModel: ObservableObject {
             try kokoroTTSEngine.generateAudio(
                 voice: voice,
                 text: trimmedSentence,
-                speed: streamingSpeed
+                speed: streamingSpeed,
+                useLegacySentenceSplit: useLegacySentenceSplit
             ) { [weak self] audioBuffer in
                 guard let self = self else {
                     semaphore.signal()

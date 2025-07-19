@@ -80,6 +80,15 @@
 		7BBF57F82DDD06B20047DCFF /* Exceptions for "Swift-TTS" folder in "Swift-TTS-iOS" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
+				Frameworks/SentencePiece.xcframework,
+				Frameworks/SentenceSegmentKit/Bridge/SentencePieceBridge.cpp,
+				Frameworks/SentenceSegmentKit/Resources/sentencepiece.bpe.model,
+				Frameworks/SentenceSegmentKit/Resources/SentenceSegment.mlmodelc,
+				Frameworks/SentenceSegmentKit/Sources/SentencePieceTokenizer.swift,
+				"Frameworks/SentenceSegmentKit/Sources/SentencePieceTokenizer+Extensions.swift",
+				Frameworks/SentenceSegmentKit/Sources/SentenceSegment.swift,
+				Frameworks/SentenceSegmentKit/Sources/SentenceSegmentKit.swift,
+				"Frameworks/SentenceSegmentKit/Sources/SentenceSplitter+Optimized.swift",
 				Kokoro/Albert/AlbertEmbeddings.swift,
 				Kokoro/Albert/AlbertEncoder.swift,
 				Kokoro/Albert/AlbertIntermediate.swift,
@@ -154,6 +163,7 @@
 				Kokoro/Resources/jf_nezumi.json,
 				Kokoro/Resources/jf_tebukuro.json,
 				Kokoro/Resources/jm_kumo.json,
+				"Kokoro/Resources/kokoro-v1_0.safetensors",
 				Kokoro/Resources/pf_dora.json,
 				Kokoro/Resources/pm_alex.json,
 				Kokoro/Resources/pm_santa.json,
@@ -200,10 +210,12 @@
 		26942E042DABD5AE00B82507 /* Exceptions for "Swift-TTS" folder in "Embed Frameworks" phase from "Swift-TTS" target */ = {
 			isa = PBXFileSystemSynchronizedGroupBuildPhaseMembershipExceptionSet;
 			attributesByRelativePath = {
+				Frameworks/SentencePiece.xcframework = (CodeSignOnCopy, RemoveHeadersOnCopy, );
 				Kokoro/Frameworks/ESpeakNG.xcframework = (CodeSignOnCopy, RemoveHeadersOnCopy, );
 			};
 			buildPhase = 26942E032DABD5AE00B82507 /* Embed Frameworks */;
 			membershipExceptions = (
+				Frameworks/SentencePiece.xcframework,
 				Kokoro/Frameworks/ESpeakNG.xcframework,
 			);
 		};
@@ -217,10 +229,12 @@
 		7BBF5EDB2DDD179D0047DCFF /* Exceptions for "Swift-TTS" folder in "Embed Frameworks" phase from "Swift-TTS-iOS" target */ = {
 			isa = PBXFileSystemSynchronizedGroupBuildPhaseMembershipExceptionSet;
 			attributesByRelativePath = {
+				Frameworks/SentencePiece.xcframework = (CodeSignOnCopy, RemoveHeadersOnCopy, );
 				Kokoro/Frameworks/ESpeakNG.xcframework = (CodeSignOnCopy, RemoveHeadersOnCopy, );
 			};
 			buildPhase = 7BBF58302DDF0A010047DCFF /* Embed Frameworks */;
 			membershipExceptions = (
+				Frameworks/SentencePiece.xcframework,
 				Kokoro/Frameworks/ESpeakNG.xcframework,
 			);
 		};
@@ -722,6 +736,7 @@
 				DEVELOPMENT_TEAM = "";
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				HEADER_SEARCH_PATHS = "$(PROJECT_DIR)/Frameworks/SentenceSegmentKit/Bridge";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -752,6 +767,7 @@
 				DEVELOPMENT_TEAM = "";
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				HEADER_SEARCH_PATHS = "$(PROJECT_DIR)/Frameworks/SentenceSegmentKit/Bridge";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;

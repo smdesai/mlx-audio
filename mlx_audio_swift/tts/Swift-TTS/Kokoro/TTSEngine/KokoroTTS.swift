@@ -506,10 +506,12 @@ public class KokoroTTS {
     }
   }
 
-  public func generateAudio(voice: TTSVoice, text: String, speed: Float = 1.0, chunkCallback: @escaping AudioChunkCallback) throws {
+  public func generateAudio(voice: TTSVoice, text: String, speed: Float = 1.0, useLegacySentenceSplit: Bool = false, chunkCallback: @escaping AudioChunkCallback) throws {
     try ensureModelInitialized()
 
-    let sentences = SentenceTokenizer.splitIntoSentences(text: text)
+    let sentences = useLegacySentenceSplit ? 
+        SentenceTokenizer.splitIntoSentencesLegacy(text: text) : 
+        SentenceTokenizer.splitIntoSentences(text: text)
     if sentences.isEmpty {
       throw KokoroTTSError.sentenceSplitError
     }

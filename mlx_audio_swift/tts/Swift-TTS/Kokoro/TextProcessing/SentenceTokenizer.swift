@@ -7,7 +7,36 @@ import Foundation
 import NaturalLanguage
 
 public final class SentenceTokenizer {
+
+    // Lazy initialization to avoid startup delay
+    private static var _segmenter: SentenceSegmentKit?
+    private static let segmenterQueue = DispatchQueue(label: "com.sentencetokenizer.init", attributes: .concurrent)
+    
+    private static var segmenter: SentenceSegmentKit {
+        return segmenterQueue.sync(flags: .barrier) {
+            if let existing = _segmenter {
+                return existing
+            }
+            do {
+                let segmenter = try SentenceSegmentKit()
+                _segmenter = segmenter
+                return segmenter
+            } catch {
+                fatalError("Failed to initialize SentenceSegmentKit: \(error)")
+            }
+        }
+    }
+    
     private init() {}
+    
+    /// Pre-warm the sentence segmenter model to avoid delays on first use
+    public static func prewarm() {
+        DispatchQueue.global(qos: .background).async {
+            _ = segmenter
+            // Optionally run a test sentence to fully warm up the model
+            _ = segmenter.splitSentences("Test sentence.")
+        }
+    }
 
     // MARK: - Initial Split
 
@@ -17,11 +46,31 @@ public final class SentenceTokenizer {
         let detectedLanguage = detectLanguage(text: text)
         let initialSentences = performInitialSplit(text: text, language: detectedLanguage)
         let refinedSentences = applyTTSRefinements(sentences: initialSentences, originalText: text)
+        
+        return refinedSentences
+    }
+    
+    public static func splitIntoSentencesLegacy(text: String) -> [String] {
+        guard !text.isEmpty else { return [] }
 
+        let detectedLanguage = detectLanguage(text: text)
+        let initialSentences = performInitialSplitLegacy(text: text, language: detectedLanguage)
+        let refinedSentences = applyTTSRefinements(sentences: initialSentences, originalText: text)
+        
         return optimizeTTSChunks(sentences: refinedSentences, language: detectedLanguage)
     }
 
     private static func performInitialSplit(text: String, language: NLLanguage?) -> [String] {
+        let sentences = Self.segmenter.splitSentences(text)
+        print("Sentences:")
+        for (i, sentence) in sentences.enumerated() {
+            print("  \(i + 1): \(sentence)")
+        }
+        return sentences.isEmpty ? [text] : sentences
+        
+    }
+    
+    private static func performInitialSplitLegacy(text: String, language: NLLanguage?) -> [String] {
         let tokenizer = NLTokenizer(unit: .sentence)
         tokenizer.string = text
 
@@ -35,7 +84,12 @@ public final class SentenceTokenizer {
             sentences.append(sentence)
             return true
         }
-
+        
+        print("Sentences (legacy):")
+        for (i, sentence) in sentences.enumerated() {
+            print("  \(i + 1): \(sentence)")
+        }
+        
         return sentences.isEmpty ? [text] : sentences
     }
 

@@ -14,6 +14,7 @@ struct ContentView: View {
 
     @State private var sayThis : String = "Hello Everybody"
     @State private var status : String = ""
+    @State private var useLegacySentenceSplit = false
 
     private var availableProviders = ["kokoro", "orpheus"]
     @State private var chosenProvider : String = "kokoro"
@@ -60,6 +61,17 @@ struct ContentView: View {
             .padding(.top, 0)
 
             TextField("Enter text", text: $sayThis).padding()
+            
+            // Add toggle for sentence splitting mode
+            HStack {
+                Text("Legacy Sentence Split")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Toggle("", isOn: $useLegacySentenceSplit)
+            }
+            .padding(.horizontal)
+            .disabled(chosenProvider != "kokoro") // Only enable for Kokoro
 
             Button(action: {
                 Task {
@@ -68,6 +80,9 @@ struct ContentView: View {
                         if kokoroTTSModel == nil {
                             kokoroTTSModel = KokoroTTSModel()
                         }
+                        
+                        // Set the legacy mode preference
+                        kokoroTTSModel!.useLegacySentenceSplit = useLegacySentenceSplit
 
                         if let kokoroVoice = TTSVoice.fromIdentifier(chosenVoice) ?? TTSVoice(rawValue: chosenVoice) {
                             kokoroTTSModel!.say(sayThis, kokoroVoice)
