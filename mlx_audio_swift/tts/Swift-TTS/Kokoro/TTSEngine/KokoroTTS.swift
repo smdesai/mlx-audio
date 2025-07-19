@@ -89,6 +89,45 @@ public class KokoroTTS {
   public typealias AudioChunkCallback = (MLXArray) -> Void
 
   init() {}
+  
+  // Prewarm the model by initializing it in the background
+  public func prewarm(voice: TTSVoice = .afHeart, completion: (() -> Void)? = nil) {
+    DispatchQueue.global(qos: .background).async { [weak self] in
+      guard let self = self else { return }
+      
+      do {
+        // Initialize the model
+        try self.ensureModelInitialized()
+        
+        // Load the default voice to prewarm voice loading
+        autoreleasepool {
+          self.voice = VoiceLoader.loadVoice(voice)
+          self.voice?.eval()
+          self.chosenVoice = voice
+        }
+        
+        // Set language for the tokenizer
+        try self.kokoroTokenizer.setLanguage(for: voice)
+        
+        // Optionally run a tiny test to fully warm up the pipeline
+        let testText = "Test"
+        let phonemizedResult = try self.kokoroTokenizer.phonemize(testText)
+        let inputIds = Tokenizer.tokenize(phonemizedText: phonemizedResult.phonemes)
+        
+        // Just tokenize, don't generate audio
+        _ = inputIds
+        
+        DispatchQueue.main.async {
+          completion?()
+        }
+      } catch {
+        print("Prewarm failed: \(error)")
+        DispatchQueue.main.async {
+          completion?()
+        }
+      }
+    }
+  }
 
   // Reset the model to free up memory
   public func resetModel(preserveTextProcessing: Bool = true) {

@@ -15,6 +15,7 @@ struct ContentView: View {
     @State private var isStreamingMode = false
     @State private var streamingTimer: Timer?
     @State private var showSettings = false
+    @State private var isModelReady = false
 
     @FocusState private var isTextEditorFocused: Bool
     @ObservedObject var viewModel: KokoroTTSModel
@@ -78,6 +79,15 @@ struct ContentView: View {
         .onChange(of: viewModel.generationInProgress) { _, newValue in
             speakerModel.isGenerating = newValue
         }
+        .onAppear {
+            // Model is prewarming in the background
+            // Set ready after a short delay to avoid showing loading state if it's fast
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                withAnimation {
+                    isModelReady = true
+                }
+            }
+        }
     }
     
     // MARK: - Header Card
@@ -90,9 +100,17 @@ struct ContentView: View {
                 .foregroundStyle(.tint)
                 .symbolEffect(.pulse, isActive: viewModel.isAudioPlaying)
             
-            Text("Kokoro TTS")
-                .font(.largeTitle)
-                .fontWeight(.bold)
+            HStack(spacing: 8) {
+                Text("Kokoro TTS")
+                    .font(.largeTitle)
+                    .fontWeight(.bold)
+                
+                if !isModelReady {
+                    ProgressView()
+                        .controlSize(.small)
+                        .transition(.opacity)
+                }
+            }
             
             // Performance metric
             HStack {

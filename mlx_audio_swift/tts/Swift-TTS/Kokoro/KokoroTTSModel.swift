@@ -15,7 +15,14 @@ public class KokoroTTSModel: ObservableObject {
     private var streamingSpeed: Float = 1.0
     
     // Sentence splitting mode
-    @Published public var useLegacySentenceSplit = false
+    @Published public var useLegacySentenceSplit = false {
+        didSet {
+            // Prewarm the sentence tokenizer when switching to new mode
+            if !useLegacySentenceSplit && oldValue {
+                SentenceTokenizer.prewarm()
+            }
+        }
+    }
 
     private var audioEngine: AVAudioEngine!
     private var playerNode: AVAudioPlayerNode!
@@ -78,6 +85,22 @@ public class KokoroTTSModel: ObservableObject {
     public init() {
         kokoroTTSEngine = KokoroTTS()
         setupAudioSystem()
+        
+        // Prewarm the model in the background
+        prewarmModel()
+    }
+    
+    // Prewarm the TTS engine to reduce initial latency
+    private func prewarmModel() {
+        // Prewarm the Kokoro TTS engine
+        kokoroTTSEngine.prewarm(voice: .afHeart) { [weak self] in
+            print("Kokoro TTS model prewarmed successfully")
+        }
+        
+        // Also prewarm the sentence tokenizer if using the new mode
+        if !useLegacySentenceSplit {
+            SentenceTokenizer.prewarm()
+        }
     }
 
     deinit {
