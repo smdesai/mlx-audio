@@ -291,10 +291,8 @@ struct ContentView: View {
                     .tint(.orange)
                     .disabled(viewModel.generationInProgress || viewModel.isStreaming)
                 }
-                .transition(.asymmetric(
-                    insertion: .opacity.combined(with: .move(edge: .top)),
-                    removal: .opacity.combined(with: .move(edge: .top))
-                ))
+                .padding(.top, 8)
+                .transition(.opacity.combined(with: .scale(scale: 0.95, anchor: .top)))
             }
         }
         .padding()
@@ -303,6 +301,7 @@ struct ContentView: View {
                 .fill(Color(.systemBackground))
                 .shadow(color: Color.black.opacity(0.05), radius: 10, y: 5)
         )
+        .clipped()
     }
     
     // MARK: - Text Input Card
