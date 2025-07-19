@@ -88,7 +88,7 @@
 				"Frameworks/SentenceSegmentKit/Sources/SentencePieceTokenizer+Extensions.swift",
 				Frameworks/SentenceSegmentKit/Sources/SentenceSegment.swift,
 				Frameworks/SentenceSegmentKit/Sources/SentenceSegmentKit.swift,
-				"Frameworks/SentenceSegmentKit/Sources/SentenceSplitter+Optimized.swift",
+				Frameworks/SentenceSegmentKit/Sources/SentenceSplitter.swift,
 				Kokoro/Albert/AlbertEmbeddings.swift,
 				Kokoro/Albert/AlbertEncoder.swift,
 				Kokoro/Albert/AlbertIntermediate.swift,
