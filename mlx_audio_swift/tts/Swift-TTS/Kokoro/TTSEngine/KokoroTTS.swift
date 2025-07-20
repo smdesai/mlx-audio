@@ -595,6 +595,11 @@ public class KokoroTTS {
     }
   }
 
+  // Public method for streaming - processes a single sentence without re-splitting
+  public func generateAudioForSingleSentence(voice: TTSVoice, text: String, speed: Float) throws -> MLXArray {
+    return try generateAudioForSentence(voice: voice, text: text, speed: speed)
+  }
+  
   private func generateAudioForSentence(voice: TTSVoice, text: String, speed: Float) throws -> MLXArray {
     try ensureModelInitialized()
 

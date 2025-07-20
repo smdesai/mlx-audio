@@ -5,6 +5,38 @@ import SwiftUI
 import UIKit
 #endif
 
+private class StreamingInternalState {
+    private var pendingTTSCount = 0
+    private let semaphore = DispatchSemaphore(value: 1)
+
+    func incrementPending() {
+        semaphore.wait()
+        pendingTTSCount += 1
+        semaphore.signal()
+    }
+
+    func decrementPending() -> Int {
+        semaphore.wait()
+        pendingTTSCount -= 1
+        let remaining = pendingTTSCount
+        semaphore.signal()
+        return remaining
+    }
+
+    func getPendingCount() -> Int {
+        semaphore.wait()
+        let count = pendingTTSCount
+        semaphore.signal()
+        return count
+    }
+
+    func reset() {
+        semaphore.wait()
+        pendingTTSCount = 0
+        semaphore.signal()
+    }
+}
+
 public class KokoroTTSModel: ObservableObject {
     private var kokoroTTSEngine: KokoroTTS!
 
@@ -13,7 +45,11 @@ public class KokoroTTSModel: ObservableObject {
     @Published public var isStreaming = false
     private var streamingVoice: TTSVoice?
     private var streamingSpeed: Float = 1.0
-    
+
+    private var streamingTextBuffer = ""
+    private var processedSentenceCount = 0
+    private let streamingBufferLock = DispatchSemaphore(value: 1)
+
     // Sentence splitting mode
     @Published public var useLegacySentenceSplit = false {
         didSet {
@@ -32,16 +68,18 @@ public class KokoroTTSModel: ObservableObject {
     private var sentenceCounter = 0
     private var audioChunkQueue: [(sentenceNum: Int, audioBuffer: MLXArray)] = []
     private var nextExpectedSentence = 1
-    private let audioQueueLock = NSLock()
+    private let audioQueueLock = DispatchSemaphore(value: 1)
     private let ttsGenerationQueue = DispatchQueue(label: "com.kokoro.tts.generation", qos: .userInitiated)
-    private var pendingTTSCount = 0
-    private let pendingTTSLock = NSLock()
+    private let streamingState = StreamingInternalState()
     private var totalSentencesExpected = 0
 
     // Buffer tracking for reliable playback completion detection
     private var scheduledBufferCount = 0
     private var completedBufferCount = 0
-    private let bufferCountLock = NSLock() // Thread safety for buffer counters
+    private let bufferCountLock = DispatchSemaphore(value: 1) // Thread safety for buffer counters
+
+    // App state tracking
+    private var isAppActive = true
 
     // State management
     private var isGenerating = false
@@ -64,9 +102,9 @@ public class KokoroTTSModel: ObservableObject {
                     } else {
                         // Stopping playback
                         // Check if we're truly done with all audio
-                        self.bufferCountLock.lock()
+                        self.bufferCountLock.wait()
                         let allBuffersCompleted = self.completedBufferCount == self.scheduledBufferCount && self.scheduledBufferCount > 0
-                        self.bufferCountLock.unlock()
+                        self.bufferCountLock.signal()
 
                         // Only clear generationInProgress if we're not actively generating and all buffers are done
                         if !self.isGenerating && allBuffersCompleted {
@@ -83,20 +121,24 @@ public class KokoroTTSModel: ObservableObject {
     @Published public var audioGenerationTime: TimeInterval = 0
 
     public init() {
+        MLX.GPU.set(cacheLimit: 20 * 1024 * 1024)
+
         kokoroTTSEngine = KokoroTTS()
         setupAudioSystem()
-        
+
+        // Setup app lifecycle notifications
+        setupAppLifecycleObservers()
+
         // Prewarm the model in the background
         prewarmModel()
     }
-    
+
     // Prewarm the TTS engine to reduce initial latency
     private func prewarmModel() {
-        // Prewarm the Kokoro TTS engine
-        kokoroTTSEngine.prewarm(voice: .afHeart) { [weak self] in
+        kokoroTTSEngine.prewarm(voice: .afHeart) {
             print("Kokoro TTS model prewarmed successfully")
         }
-        
+
         // Also prewarm the sentence tokenizer if using the new mode
         if !useLegacySentenceSplit {
             SentenceTokenizer.prewarm()
@@ -107,6 +149,71 @@ public class KokoroTTSModel: ObservableObject {
          NotificationCenter.default.removeObserver(self)
          cleanupAudioSystem()
      }
+
+    // MARK: - App Lifecycle Management
+
+    private func setupAppLifecycleObservers() {
+        #if os(iOS)
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(appWillResignActive),
+            name: UIApplication.willResignActiveNotification,
+            object: nil
+        )
+
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(appDidBecomeActive),
+            name: UIApplication.didBecomeActiveNotification,
+            object: nil
+        )
+
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(appDidEnterBackground),
+            name: UIApplication.didEnterBackgroundNotification,
+            object: nil
+        )
+        #endif
+    }
+
+    @objc private func appWillResignActive() {
+        // App is about to become inactive (user switching apps, receiving call, etc)
+        // Stop any ongoing TTS generation and playback
+        print("App will resign active - stopping TTS operations")
+
+        isAppActive = false
+
+        // Stop streaming if active
+        if isStreaming {
+            stopStreamingV2()
+        }
+
+        // Stop any ongoing playback
+        stopPlayback()
+
+        // Clear GPU cache to prevent background GPU operations
+        MLX.GPU.clearCache()
+    }
+
+    @objc private func appDidEnterBackground() {
+        print("App entered background - clearing GPU resources")
+
+        // Force clear any remaining GPU operations
+        MLX.GPU.clearCache()
+
+        // Reset the TTS engine to free GPU resources
+        kokoroTTSEngine.resetModel(preserveTextProcessing: true)
+    }
+
+    @objc private func appDidBecomeActive() {
+        // App became active again
+        print("App became active - ready for TTS operations")
+
+        isAppActive = true
+
+        // The model will be re-initialized on demand when needed
+    }
 
     // MARK: - Audio System Setup
 
@@ -188,6 +295,12 @@ public class KokoroTTSModel: ObservableObject {
     }
 
     public func say(_ text: String, _ voice: TTSVoice, speed: Float = 1.0) {
+        // Check if app is active
+        guard isAppActive else {
+            print("App is not active - ignoring TTS request")
+            return
+        }
+
         let trimmedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
          guard !trimmedText.isEmpty else {
              return
@@ -267,23 +380,23 @@ public class KokoroTTSModel: ObservableObject {
     // MARK: - Buffer Tracking
 
      private func resetBufferCounters() {
-         bufferCountLock.lock()
-         defer { bufferCountLock.unlock() }
+         bufferCountLock.wait()
+         defer { bufferCountLock.signal() }
 
          scheduledBufferCount = 0
          completedBufferCount = 0
      }
 
      private func incrementScheduledBufferCount() {
-         bufferCountLock.lock()
-         defer { bufferCountLock.unlock() }
+         bufferCountLock.wait()
+         defer { bufferCountLock.signal() }
 
          scheduledBufferCount += 1
      }
 
      private func incrementCompletedBufferCount() {
-         bufferCountLock.lock()
-         defer { bufferCountLock.unlock() }
+         bufferCountLock.wait()
+         defer { bufferCountLock.signal() }
 
          completedBufferCount += 1
 
@@ -414,9 +527,9 @@ public class KokoroTTSModel: ObservableObject {
 
                 if !isActuallyPlaying {
                     // Check buffer counts for more accurate completion detection
-                    self.bufferCountLock.lock()
+                    self.bufferCountLock.wait()
                     let allBuffersCompleted = self.completedBufferCount == self.scheduledBufferCount
-                    self.bufferCountLock.unlock()
+                    self.bufferCountLock.signal()
 
                     if allBuffersCompleted && !self.isGenerating {
                         // All buffers completed and no more generation happening
@@ -534,11 +647,11 @@ public class KokoroTTSModel: ObservableObject {
         let hasScheduledBuffers = playerNode.engine?.isRunning ?? false
 
         // Check buffer counts for better completion detection
-        bufferCountLock.lock()
+        bufferCountLock.wait()
         let buffersScheduled = scheduledBufferCount
         let buffersCompleted = completedBufferCount
         let allBuffersCompleted = buffersCompleted == buffersScheduled && buffersScheduled > 0
-        bufferCountLock.unlock()
+        bufferCountLock.signal()
 
         // Additional check: if we have scheduled buffers but none completed after some time, assume completion
         let possibleStuckBuffers = buffersScheduled > 0 && buffersCompleted == 0 && !isActuallyPlaying
@@ -658,7 +771,7 @@ public class KokoroTTSModel: ObservableObject {
         sentenceCounter = 0
         audioChunkQueue.removeAll()
         nextExpectedSentence = 1
-        pendingTTSCount = 0
+        streamingState.reset()
         totalSentencesExpected = 0
 
         // Reset buffer counters to ensure proper tracking
@@ -693,19 +806,13 @@ public class KokoroTTSModel: ObservableObject {
                 print("[STREAMING] Received sentence #\(sentenceNum): '\(sentence)'")
 
                 // Track pending TTS
-                self.pendingTTSLock.lock()
-                self.pendingTTSCount += 1
-                self.pendingTTSLock.unlock()
+                self.streamingState.incrementPending()
 
                 // Queue for TTS generation - serialized to avoid mixing
                 self.ttsGenerationQueue.async {
                     self.processSentenceForStreaming(sentence, sentenceNum: sentenceNum)
 
-                    // Decrement pending count
-                    self.pendingTTSLock.lock()
-                    self.pendingTTSCount -= 1
-                    let remaining = self.pendingTTSCount
-                    self.pendingTTSLock.unlock()
+                    let remaining = self.streamingState.decrementPending()
 
                     print("[STREAMING] Completed TTS for sentence #\(sentenceNum), remaining: \(remaining)")
                 }
@@ -740,9 +847,7 @@ public class KokoroTTSModel: ObservableObject {
                 self.totalSentencesExpected = sentenceNum
 
                 // Track pending TTS
-                self.pendingTTSLock.lock()
-                self.pendingTTSCount += 1
-                self.pendingTTSLock.unlock()
+                self.streamingState.incrementPending()
 
                 // Signal that flush has been processed
                 flushStarted.signal()
@@ -751,11 +856,7 @@ public class KokoroTTSModel: ObservableObject {
                 self.ttsGenerationQueue.async {
                     self.processSentenceForStreaming(sentence, sentenceNum: sentenceNum)
 
-                    // Decrement pending count
-                    self.pendingTTSLock.lock()
-                    self.pendingTTSCount -= 1
-                    let remaining = self.pendingTTSCount
-                    self.pendingTTSLock.unlock()
+                    let remaining = self.streamingState.decrementPending()
 
                     print("[STREAMING] Completed TTS for sentence #\(sentenceNum), remaining: \(remaining)")
                 }
@@ -780,9 +881,7 @@ public class KokoroTTSModel: ObservableObject {
             // Wait for all pending TTS to complete
             var waitCount = 0
             while waitCount < 100 { // Max 10 seconds wait
-                self.pendingTTSLock.lock()
-                let pending = self.pendingTTSCount
-                self.pendingTTSLock.unlock()
+                let pending = self.streamingState.getPendingCount()
 
                 if pending == 0 {
                     print("[STREAMING] All TTS generation complete")
@@ -800,10 +899,10 @@ public class KokoroTTSModel: ObservableObject {
             // Now wait for audio queue to empty
             waitCount = 0
             while waitCount < 50 { // Max 5 seconds wait
-                self.audioQueueLock.lock()
+                self.audioQueueLock.wait()
                 let queueSize = self.audioChunkQueue.count
                 let nextExpected = self.nextExpectedSentence
-                self.audioQueueLock.unlock()
+                self.audioQueueLock.signal()
 
                 if queueSize == 0 {
                     print("[STREAMING] Audio queue empty, next expected: \(nextExpected)")
@@ -861,6 +960,12 @@ public class KokoroTTSModel: ObservableObject {
     }
 
     private func processSentenceForStreaming(_ sentence: String, sentenceNum: Int) {
+        // Check if app is active before processing
+        guard isAppActive else {
+            print("App is not active - skipping TTS generation for sentence #\(sentenceNum)")
+            return
+        }
+
         guard let voice = streamingVoice else {
             print("ERROR: No streaming voice set for sentence #\(sentenceNum): '\(sentence)'")
             return
@@ -892,48 +997,28 @@ public class KokoroTTSModel: ObservableObject {
 
         // We keep isGenerating = true until all audio is done
 
-        // Use a semaphore to ensure generateAudio completes before moving to next sentence
-        let semaphore = DispatchSemaphore(value: 0)
-        var generationError: Error?
-
         do {
-            // Generate audio for the sentence
-            try kokoroTTSEngine.generateAudio(
+            // Generate audio for the single sentence (no re-splitting)
+            let audioBuffer = try kokoroTTSEngine.generateAudioForSingleSentence(
                 voice: voice,
                 text: trimmedSentence,
-                speed: streamingSpeed,
-                useLegacySentenceSplit: useLegacySentenceSplit
-            ) { [weak self] audioBuffer in
-                guard let self = self else {
-                    semaphore.signal()
-                    return
-                }
+                speed: streamingSpeed
+            )
 
-                print("[STREAMING] AUDIO Received for sentence #\(sentenceNum): '\(trimmedSentence)'")
+            print("[STREAMING] AUDIO Generated for sentence #\(sentenceNum): '\(trimmedSentence)'")
 
-                // Update generation time on first audio chunk
-                if self.audioGenerationTime == 0.0 {
-                    self.audioGenerationTime = Date().timeIntervalSince(generationStartTime)
-                    print("First audio chunk received after: \(self.audioGenerationTime)s")
-                }
-
-                // Queue the audio chunk with its sentence number
-                self.queueAudioChunk(audioBuffer, sentenceNum: sentenceNum)
-
-                // Signal completion
-                semaphore.signal()
+            // Update generation time on first audio chunk
+            if self.audioGenerationTime == 0.0 {
+                self.audioGenerationTime = Date().timeIntervalSince(generationStartTime)
+                print("First audio chunk received after: \(self.audioGenerationTime)s")
             }
 
-            // Wait for generation to complete
-            _ = semaphore.wait(timeout: .now() + 10.0)
+            // Queue the audio chunk with its sentence number
+            self.queueAudioChunk(audioBuffer, sentenceNum: sentenceNum)
 
             print("Successfully completed audio generation for sentence #\(sentenceNum): '\(trimmedSentence)'")
 
-        } catch {
-            generationError = error
-        }
-
-        if let error = generationError {
+        } catch let error {
             print("ERROR generating audio for streaming sentence: \(error)")
 
             // Log the error type
@@ -947,14 +1032,12 @@ public class KokoroTTSModel: ObservableObject {
                     print("ERROR: Too many tokens in sentence")
                 }
             }
-        } else if generationError != nil {
-            print("ERROR: Timeout or other error in audio generation")
         }
     }
 
     private func queueAudioChunk(_ audioBuffer: MLXArray, sentenceNum: Int) {
-        audioQueueLock.lock()
-        defer { audioQueueLock.unlock() }
+        audioQueueLock.wait()
+        defer { audioQueueLock.signal() }
 
         // Add to queue
         audioChunkQueue.append((sentenceNum: sentenceNum, audioBuffer: audioBuffer))
@@ -994,6 +1077,280 @@ public class KokoroTTSModel: ObservableObject {
 
         if !audioChunkQueue.isEmpty {
             print("[STREAMING] Waiting for sentence #\(nextExpectedSentence), have: \(audioChunkQueue.map { $0.sentenceNum })")
+        }
+    }
+
+    // MARK: - New Streaming Implementation using SentenceTokenizer
+
+    /// Start a streaming session using SentenceTokenizer for better sentence detection
+    public func startStreamingV2(voice: TTSVoice, speed: Float = 1.0) {
+        guard !isStreaming else {
+            print("Streaming already in progress")
+            return
+        }
+
+        print("Starting streaming session V2 with voice: \(voice.rawValue), speed: \(speed)")
+
+        // Stop any ongoing playback monitoring from previous sessions
+        stopPlaybackMonitoring()
+
+        // Initialize streaming state
+        isStreaming = true
+        streamingVoice = voice
+        streamingSpeed = speed
+        streamingTextBuffer = ""
+        processedSentenceCount = 0
+        sentenceCounter = 0
+        audioChunkQueue.removeAll()
+        nextExpectedSentence = 1
+        streamingState.reset()
+        totalSentencesExpected = 0
+
+        // Reset buffer counters to ensure proper tracking
+        resetBufferCounters()
+
+        // Reset audio generation time
+        audioGenerationTime = 0.0
+
+        // Set state at start of streaming
+        DispatchQueue.main.async {
+            self.generationInProgress = true
+            self.isGenerating = true
+            self.objectWillChange.send()
+        }
+    }
+
+    /// Add text chunks and process complete sentences
+    public func addStreamingTextV2(_ text: String) {
+        guard isStreaming else {
+            print("No active streaming session")
+            return
+        }
+
+        // Thread-safe append to buffer
+        streamingBufferLock.wait()
+        streamingTextBuffer += text
+        streamingBufferLock.signal()
+
+        // Try to extract complete sentences
+        processBufferedText()
+    }
+
+    /// Process buffered text to extract complete sentences
+    private func processBufferedText() {
+        streamingBufferLock.wait()
+        let fullBuffer = streamingTextBuffer
+        let currentProcessedCount = processedSentenceCount
+        streamingBufferLock.signal()
+
+        // Use SentenceTokenizer to split the entire buffer
+        let sentences = useLegacySentenceSplit ?
+            SentenceTokenizer.splitIntoSentencesLegacy(text: fullBuffer) :
+            SentenceTokenizer.splitIntoSentences(text: fullBuffer)
+
+        // If we have no sentences or haven't received new sentences, wait
+        if sentences.isEmpty || sentences.count <= currentProcessedCount {
+            return
+        }
+
+        // Helper function to check if a sentence ends with valid punctuation
+        func isCompleteSentence(_ sentence: String) -> Bool {
+            let trimmed = sentence.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.hasSuffix(".") ||
+                   trimmed.hasSuffix("!") ||
+                   trimmed.hasSuffix("?") ||
+                   trimmed.hasSuffix("。") ||
+                   trimmed.hasSuffix("！") ||
+                   trimmed.hasSuffix("？")
+        }
+
+        // Determine how many sentences to process
+        let lastSentence = sentences.last!
+        let lastSentenceIsComplete = isCompleteSentence(lastSentence)
+
+        let sentencesToProcessCount: Int
+        if lastSentenceIsComplete {
+            // All sentences are complete
+            sentencesToProcessCount = sentences.count
+        } else {
+            // Last sentence is incomplete
+            if sentences.count == 1 {
+                // Only one incomplete sentence - don't process anything yet
+                return
+            } else {
+                // Process all but the last incomplete sentence
+                sentencesToProcessCount = sentences.count - 1
+            }
+        }
+
+        // Process only new sentences (those after processedSentenceCount)
+        let newSentences = Array(sentences[currentProcessedCount..<sentencesToProcessCount])
+
+        // Process new complete sentences
+        for sentence in newSentences {
+            let trimmed = sentence.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty {
+                streamingQueue.async {
+                    self.sentenceCounter += 1
+                    let sentenceNum = self.sentenceCounter
+                    print("[STREAMING V2] Processing sentence #\(sentenceNum): '\(trimmed)'")
+
+                    // Track pending TTS
+                    self.streamingState.incrementPending()
+
+                    // Queue for TTS generation
+                    self.ttsGenerationQueue.async {
+                        self.processSentenceForStreaming(trimmed, sentenceNum: sentenceNum)
+
+                        // Decrement pending count
+                        let remaining = self.streamingState.decrementPending()
+
+                        print("[STREAMING V2] Completed TTS for sentence #\(sentenceNum), remaining: \(remaining)")
+                    }
+                }
+            }
+        }
+
+        // Update the processed count
+        streamingBufferLock.wait()
+        processedSentenceCount = sentencesToProcessCount
+        streamingBufferLock.signal()
+    }
+
+    /// End the streaming session V2
+    public func endStreamingV2() {
+        guard isStreaming else {
+            print("No active streaming session to end")
+            return
+        }
+
+        print("[STREAMING V2] Ending streaming session")
+
+        // Process any remaining text in buffer as final sentence
+        streamingBufferLock.wait()
+        let fullBuffer = streamingTextBuffer
+        let currentProcessedCount = processedSentenceCount
+        streamingBufferLock.signal()
+
+        // Get all sentences including any incomplete final one
+        let sentences = useLegacySentenceSplit ?
+            SentenceTokenizer.splitIntoSentencesLegacy(text: fullBuffer) :
+            SentenceTokenizer.splitIntoSentences(text: fullBuffer)
+
+        // Process any remaining unprocessed sentences
+        let remainingText = sentences.count > currentProcessedCount ?
+            sentences[currentProcessedCount...].joined(separator: " ") : ""
+
+        if !remainingText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            streamingQueue.async {
+                self.sentenceCounter += 1
+                let sentenceNum = self.sentenceCounter
+                let finalSentence = remainingText.trimmingCharacters(in: .whitespacesAndNewlines)
+
+                print("[STREAMING V2] Processing final sentence #\(sentenceNum): '\(finalSentence)'")
+
+                // Update total expected sentences
+                self.totalSentencesExpected = sentenceNum
+
+                // Track pending TTS
+                self.streamingState.incrementPending()
+
+                // Queue for TTS generation
+                self.ttsGenerationQueue.async {
+                    self.processSentenceForStreaming(finalSentence, sentenceNum: sentenceNum)
+
+                    // Decrement pending count
+                    let remaining = self.streamingState.decrementPending()
+
+                    print("[STREAMING V2] Completed TTS for final sentence #\(sentenceNum), remaining: \(remaining)")
+                }
+            }
+        } else {
+            // No final sentence to process
+            totalSentencesExpected = sentenceCounter
+        }
+
+        // Clear buffer and reset index
+        streamingBufferLock.wait()
+        streamingTextBuffer = ""
+        processedSentenceCount = 0
+        streamingBufferLock.signal()
+
+        // Wait for all sentences to be processed before cleanup
+        DispatchQueue.global(qos: .background).async { [weak self] in
+            guard let self = self else { return }
+
+            // Wait for all pending TTS to complete
+            var waitCount = 0
+            while waitCount < 100 { // Max 10 seconds wait
+                let pending = self.streamingState.getPendingCount()
+
+                if pending == 0 {
+                    print("[STREAMING V2] All TTS generation complete")
+                    break
+                }
+
+                if waitCount % 10 == 0 {
+                    print("[STREAMING V2] Waiting for \(pending) TTS generations to complete...")
+                }
+
+                Thread.sleep(forTimeInterval: 0.1)
+                waitCount += 1
+            }
+
+            // Now wait for audio queue to empty
+            waitCount = 0
+            while waitCount < 50 { // Max 5 seconds wait
+                self.audioQueueLock.wait()
+                let queueSize = self.audioChunkQueue.count
+                self.audioQueueLock.signal()
+
+                if queueSize == 0 {
+                    print("[STREAMING V2] Audio queue empty")
+                    break
+                }
+
+                if waitCount % 10 == 0 {
+                    print("[STREAMING V2] Waiting for \(queueSize) audio chunks to play...")
+                }
+
+                Thread.sleep(forTimeInterval: 0.1)
+                waitCount += 1
+            }
+
+            // Clean up on main thread
+            DispatchQueue.main.async {
+                self.isStreaming = false
+                self.isGenerating = false
+                self.streamingVoice = nil
+
+                // Check playback state
+                let isPlaying = self.playerNode.isPlaying
+
+                if !isPlaying {
+                    self.isAudioPlaying = false
+                    self.generationInProgress = false
+                    self.objectWillChange.send()
+                } else if self.playbackMonitorTimer == nil {
+                    self.startPlaybackMonitoring()
+                }
+            }
+        }
+    }
+
+    /// Stop streaming immediately V2
+    public func stopStreamingV2() {
+        if isStreaming {
+            print("Stopping streaming session V2")
+            isStreaming = false
+            streamingVoice = nil
+
+            streamingBufferLock.wait()
+            streamingTextBuffer = ""
+            processedSentenceCount = 0
+            streamingBufferLock.signal()
+
+            stopPlayback()
         }
     }
 }

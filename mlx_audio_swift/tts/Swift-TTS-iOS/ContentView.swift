@@ -387,7 +387,6 @@ struct ContentView: View {
                             return
                         }
                         let speaker = speakerModel.getPrimarySpeaker().first!
-                        MLX.GPU.set(cacheLimit: 20 * 1024 * 1024)
                         viewModel.say(t, TTSVoice.fromIdentifier(speaker.name) ?? .afHeart, speed: Float(speed))
                     }
                 }
@@ -482,16 +481,14 @@ struct ContentView: View {
         let speaker = speakerModel.getPrimarySpeaker().first!
         let voice = TTSVoice.fromIdentifier(speaker.name) ?? .afHeart
 
-        MLX.GPU.set(cacheLimit: 20 * 1024 * 1024)
-
-        viewModel.startStreaming(voice: voice, speed: Float(speed))
+        viewModel.startStreamingV2(voice: voice, speed: Float(speed))
 
         // Simulate text arrival in chunks
         var currentIndex = fullText.startIndex
         streamingTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { timer in
             if currentIndex >= fullText.endIndex {
                 // End streaming when all text is sent
-                viewModel.endStreaming()
+                viewModel.endStreamingV2()
                 timer.invalidate()
                 return
             }
@@ -501,7 +498,7 @@ struct ContentView: View {
             let endIndex = fullText.index(currentIndex, offsetBy: chunkSize, limitedBy: fullText.endIndex) ?? fullText.endIndex
             let chunk = String(fullText[currentIndex..<endIndex])
 
-            viewModel.addStreamingText(chunk)
+            viewModel.addStreamingTextV2(chunk)
             currentIndex = endIndex
         }
     }
@@ -509,7 +506,7 @@ struct ContentView: View {
     private func stopStreaming() {
         streamingTimer?.invalidate()
         streamingTimer = nil
-        viewModel.stopStreaming()
+        viewModel.stopStreamingV2()
     }
 }
 
