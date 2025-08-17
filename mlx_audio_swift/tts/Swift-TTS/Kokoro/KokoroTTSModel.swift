@@ -1,3 +1,8 @@
+//
+//  KokoroTTSModel.swift
+//  Swift-TTS
+//
+
 import AVFoundation
 import MLX
 import SwiftUI
@@ -45,9 +50,9 @@ public class KokoroTTSModel: ObservableObject {
     @Published public var isStreaming = false
     private var streamingVoice: TTSVoice?
     private var streamingSpeed: Float = 1.0
+    @Published public var streamingSentenceThreshold: Float = 0.5
 
     private var streamingTextBuffer = ""
-    private var processedSentenceCount = 0
     private let streamingBufferLock = DispatchSemaphore(value: 1)
 
     // Sentence splitting mode
@@ -118,7 +123,23 @@ public class KokoroTTSModel: ObservableObject {
         }
     }
 
+    // Performance metrics
+    @Published public var performanceMetrics = TTSPerformanceMetrics()
+    
+    // Keep existing properties for backward compatibility
     @Published public var audioGenerationTime: TimeInterval = 0
+    @Published public var totalGenerationTime: TimeInterval = 0
+    @Published public var totalCompletionTime: TimeInterval = 0
+    
+    private var generationStartTime: Date?
+    private var allAudioGeneratedTime: Date?
+
+    public typealias CompletionCallback = (TimeInterval, TimeInterval) -> Void
+    private var completionCallback: CompletionCallback?
+    
+    // New callback with metrics
+    public typealias MetricsCompletionCallback = (TTSPerformanceMetrics) -> Void
+    private var metricsCompletionCallback: MetricsCompletionCallback?
 
     public init() {
         MLX.GPU.set(cacheLimit: 20 * 1024 * 1024)
@@ -294,6 +315,14 @@ public class KokoroTTSModel: ObservableObject {
         }
     }
 
+    public func setCompletionCallback(_ callback: CompletionCallback?) {
+        self.completionCallback = callback
+    }
+    
+    public func setMetricsCompletionCallback(_ callback: MetricsCompletionCallback?) {
+        self.metricsCompletionCallback = callback
+    }
+
     public func say(_ text: String, _ voice: TTSVoice, speed: Float = 1.0) {
         // Check if app is active
         guard isAppActive else {
@@ -306,8 +335,16 @@ public class KokoroTTSModel: ObservableObject {
              return
          }
 
-         // Reset timing metrics
+         // Reset timing metrics (both old and new)
          audioGenerationTime = 0.0
+         totalGenerationTime = 0.0
+         totalCompletionTime = 0.0
+         generationStartTime = Date()
+         allAudioGeneratedTime = nil
+         
+         // Also update new metrics
+         performanceMetrics.startGeneration()
+         performanceMetrics.addProcessedText(trimmedText)
 
          // Set state at start
          DispatchQueue.main.async {
@@ -356,6 +393,11 @@ public class KokoroTTSModel: ObservableObject {
 
         // Reset all internal state flags
         isGenerating = false
+
+        // Clear timing data
+        generationStartTime = nil
+        allAudioGeneratedTime = nil
+        performanceMetrics.reset()
 
         // Force UI update on main thread with proper sequencing
         DispatchQueue.main.async {
@@ -444,10 +486,23 @@ public class KokoroTTSModel: ObservableObject {
             ) { [weak self] audioBuffer in
                 guard let self = self else { return }
 
-                // Update generation time on first chunk
+                // Update generation time on first chunk (old style)
                 if self.audioGenerationTime == 0.0 {
                     self.audioGenerationTime = Date().timeIntervalSince(generationStartTime)
                 }
+                
+                // Update total generation time on each chunk (will be accurate on last chunk)
+                if let startTime = self.generationStartTime {
+                    self.allAudioGeneratedTime = Date()
+                    self.totalGenerationTime = self.allAudioGeneratedTime!.timeIntervalSince(startTime)
+                }
+                
+                // Also update new metrics
+                if self.performanceMetrics.timeToFirstAudio == 0.0 {
+                    self.performanceMetrics.recordFirstAudio()
+                }
+                self.performanceMetrics.recordGenerationProgress()
+                self.performanceMetrics.addAudioChunk()
 
                 DispatchQueue.main.async {
                     self.playAudioChunk(audioBuffer)
@@ -670,6 +725,16 @@ public class KokoroTTSModel: ObservableObject {
                 playerNode.stop()
             }
 
+            // Calculate total completion time
+            if let startTime = self.generationStartTime {
+                self.totalCompletionTime = Date().timeIntervalSince(startTime)
+
+                // Call completion callback if set
+                if let callback = self.completionCallback {
+                    callback(self.totalGenerationTime, self.totalCompletionTime)
+                }
+            }
+
             // No more buffers are playing, mark playback as complete
             self.isAudioPlaying = false  // This will trigger generationInProgress update
 
@@ -777,8 +842,15 @@ public class KokoroTTSModel: ObservableObject {
         // Reset buffer counters to ensure proper tracking
         resetBufferCounters()
 
-        // Reset audio generation time
+        // Reset timing metrics (both old and new)
         audioGenerationTime = 0.0
+        totalGenerationTime = 0.0
+        totalCompletionTime = 0.0
+        generationStartTime = Date()
+        allAudioGeneratedTime = nil
+        
+        // Also update new metrics
+        performanceMetrics.startGeneration()
 
         // Set state at start of streaming
         DispatchQueue.main.async {
@@ -799,10 +871,12 @@ public class KokoroTTSModel: ObservableObject {
         stream2Sentence.addText(text) { [weak self] sentence in
             guard let self = self else { return }
 
+            // Increment counter synchronously to ensure correct ordering
+            self.sentenceCounter += 1
+            let sentenceNum = self.sentenceCounter
+
             // Process sentences with tracking
             self.streamingQueue.async {
-                self.sentenceCounter += 1
-                let sentenceNum = self.sentenceCounter
                 print("[STREAMING] Received sentence #\(sentenceNum): '\(sentence)'")
 
                 // Track pending TTS
@@ -838,13 +912,16 @@ public class KokoroTTSModel: ObservableObject {
                 flushStarted.signal()
                 return
             }
-            self.streamingQueue.async {
-                self.sentenceCounter += 1
-                let sentenceNum = self.sentenceCounter
-                print("[STREAMING] Flushed sentence #\(sentenceNum): '\(sentence)'")
 
-                // Update total expected sentences
-                self.totalSentencesExpected = sentenceNum
+            // Increment counter synchronously to ensure correct ordering
+            self.sentenceCounter += 1
+            let sentenceNum = self.sentenceCounter
+
+            // Update total expected sentences
+            self.totalSentencesExpected = sentenceNum
+
+            self.streamingQueue.async {
+                print("[STREAMING] Flushed sentence #\(sentenceNum): '\(sentence)'")
 
                 // Track pending TTS
                 self.streamingState.incrementPending()
@@ -935,6 +1012,17 @@ public class KokoroTTSModel: ObservableObject {
                 if !isPlaying {
                     self.isAudioPlaying = false
                     self.generationInProgress = false
+
+                    // Calculate total completion time if not playing
+                    if let startTime = self.generationStartTime {
+                        self.totalCompletionTime = Date().timeIntervalSince(startTime)
+
+                        // Call completion callback
+                        if let callback = self.completionCallback {
+                            callback(self.totalGenerationTime, self.totalCompletionTime)
+                        }
+                    }
+
                     self.objectWillChange.send()
                 } else {
                     // Audio is still playing, ensure monitoring is active
@@ -992,9 +1080,6 @@ public class KokoroTTSModel: ObservableObject {
             }
         }
 
-        // Track when we start generating the first sentence
-        let generationStartTime = Date()
-
         // We keep isGenerating = true until all audio is done
 
         do {
@@ -1008,9 +1093,15 @@ public class KokoroTTSModel: ObservableObject {
             print("[STREAMING] AUDIO Generated for sentence #\(sentenceNum): '\(trimmedSentence)'")
 
             // Update generation time on first audio chunk
-            if self.audioGenerationTime == 0.0 {
-                self.audioGenerationTime = Date().timeIntervalSince(generationStartTime)
+            if self.audioGenerationTime == 0.0, let startTime = self.generationStartTime {
+                self.audioGenerationTime = Date().timeIntervalSince(startTime)
                 print("First audio chunk received after: \(self.audioGenerationTime)s")
+            }
+
+            // Update total generation time on each sentence (will be accurate on last sentence)
+            if let startTime = self.generationStartTime {
+                self.allAudioGeneratedTime = Date()
+                self.totalGenerationTime = self.allAudioGeneratedTime!.timeIntervalSince(startTime)
             }
 
             // Queue the audio chunk with its sentence number
@@ -1099,7 +1190,6 @@ public class KokoroTTSModel: ObservableObject {
         streamingVoice = voice
         streamingSpeed = speed
         streamingTextBuffer = ""
-        processedSentenceCount = 0
         sentenceCounter = 0
         audioChunkQueue.removeAll()
         nextExpectedSentence = 1
@@ -1109,8 +1199,15 @@ public class KokoroTTSModel: ObservableObject {
         // Reset buffer counters to ensure proper tracking
         resetBufferCounters()
 
-        // Reset audio generation time
+        // Reset timing metrics (both old and new)
         audioGenerationTime = 0.0
+        totalGenerationTime = 0.0
+        totalCompletionTime = 0.0
+        generationStartTime = Date()
+        allAudioGeneratedTime = nil
+        
+        // Also update new metrics
+        performanceMetrics.startGeneration()
 
         // Set state at start of streaming
         DispatchQueue.main.async {
@@ -1138,18 +1235,41 @@ public class KokoroTTSModel: ObservableObject {
 
     /// Process buffered text to extract complete sentences
     private func processBufferedText() {
+        // Get a copy of the buffer and the sentences to process
+        var sentencesToProcess: [String] = []
+
         streamingBufferLock.wait()
-        let fullBuffer = streamingTextBuffer
-        let currentProcessedCount = processedSentenceCount
-        streamingBufferLock.signal()
 
-        // Use SentenceTokenizer to split the entire buffer
+        // Skip if buffer is empty
+        guard !streamingTextBuffer.isEmpty else {
+            streamingBufferLock.signal()
+            return
+        }
+
+        let currentBuffer = streamingTextBuffer
+
+        // Count words in buffer to ensure we have enough context
+        let wordCount = currentBuffer.split(separator: " ").count
+
+        // Only process if we have enough words for context (unless streaming is ending)
+        // This helps the sentence splitter make better decisions about abbreviations
+        if wordCount < 15 && isStreaming {
+            // Wait for more text to accumulate for better sentence detection
+            streamingBufferLock.signal()
+            return
+        }
+
+        // Also force processing if buffer is getting too large to prevent excessive delay
+        let forceProcess = wordCount > 50  // Process if we have too much accumulated text
+
+        // Use SentenceTokenizer to split the buffer
         let sentences = useLegacySentenceSplit ?
-            SentenceTokenizer.splitIntoSentencesLegacy(text: fullBuffer) :
-            SentenceTokenizer.splitIntoSentences(text: fullBuffer)
+            SentenceTokenizer.splitIntoSentencesLegacy(text: currentBuffer) :
+            SentenceTokenizer.splitIntoSentences(text: currentBuffer, threshold: streamingSentenceThreshold)
 
-        // If we have no sentences or haven't received new sentences, wait
-        if sentences.isEmpty || sentences.count <= currentProcessedCount {
+        // If we have no sentences, wait for more text
+        if sentences.isEmpty {
+            streamingBufferLock.signal()
             return
         }
 
@@ -1164,36 +1284,61 @@ public class KokoroTTSModel: ObservableObject {
                    trimmed.hasSuffix("？")
         }
 
-        // Determine how many sentences to process
-        let lastSentence = sentences.last!
-        let lastSentenceIsComplete = isCompleteSentence(lastSentence)
+        // Simpler approach: just track how many complete sentences we have
+        var numCompleteSentences = 0
 
-        let sentencesToProcessCount: Int
-        if lastSentenceIsComplete {
-            // All sentences are complete
-            sentencesToProcessCount = sentences.count
-        } else {
-            // Last sentence is incomplete
-            if sentences.count == 1 {
-                // Only one incomplete sentence - don't process anything yet
-                return
+        for (index, sentence) in sentences.enumerated() {
+            let isLast = (index == sentences.count - 1)
+
+            if isLast && !isCompleteSentence(sentence) {
+                // Last sentence is incomplete
+                if forceProcess {
+                    // Buffer is too large, process even incomplete sentence
+                    sentencesToProcess.append(sentence)
+                    numCompleteSentences += 1
+                } else if numCompleteSentences > 0 {
+                    // We have complete sentences already, process them
+                    break  // Process what we have, keep the incomplete one
+                } else {
+                    // No complete sentences yet, need to wait for more text
+                    streamingBufferLock.signal()
+                    return
+                }
             } else {
-                // Process all but the last incomplete sentence
-                sentencesToProcessCount = sentences.count - 1
+                // Complete sentence - will process it
+                sentencesToProcess.append(sentence)
+                numCompleteSentences += 1
             }
         }
 
-        // Process only new sentences (those after processedSentenceCount)
-        let newSentences = Array(sentences[currentProcessedCount..<sentencesToProcessCount])
+        // Now reconstruct the buffer to only contain unprocessed text
+        // The unprocessed text is everything after the complete sentences
+        if numCompleteSentences == sentences.count {
+            // All sentences were complete - clear the buffer
+            streamingTextBuffer = ""
+        } else if numCompleteSentences > 0 {
+            // Some sentences were complete - keep the rest
+            // Join the remaining sentences back together
+            let remainingSentences = Array(sentences[numCompleteSentences...])
+            streamingTextBuffer = remainingSentences.joined(separator: " ")
+        }
+        // else: no complete sentences, keep buffer as is
 
-        // Process new complete sentences
-        for sentence in newSentences {
+        streamingBufferLock.signal()
+
+        // Process the complete sentences
+        for sentence in sentencesToProcess {
             let trimmed = sentence.trimmingCharacters(in: .whitespacesAndNewlines)
             if !trimmed.isEmpty {
+                // Increment counter synchronously to ensure correct ordering
+                self.sentenceCounter += 1
+                let sentenceNum = self.sentenceCounter
+
                 streamingQueue.async {
-                    self.sentenceCounter += 1
-                    let sentenceNum = self.sentenceCounter
                     print("[STREAMING V2] Processing sentence #\(sentenceNum): '\(trimmed)'")
+                    
+                    // Track in metrics
+                    self.performanceMetrics.addProcessedText(trimmed)
 
                     // Track pending TTS
                     self.streamingState.incrementPending()
@@ -1210,11 +1355,6 @@ public class KokoroTTSModel: ObservableObject {
                 }
             }
         }
-
-        // Update the processed count
-        streamingBufferLock.wait()
-        processedSentenceCount = sentencesToProcessCount
-        streamingBufferLock.signal()
     }
 
     /// End the streaming session V2
@@ -1228,29 +1368,22 @@ public class KokoroTTSModel: ObservableObject {
 
         // Process any remaining text in buffer as final sentence
         streamingBufferLock.wait()
-        let fullBuffer = streamingTextBuffer
-        let currentProcessedCount = processedSentenceCount
+        let remainingText = streamingTextBuffer
+        streamingTextBuffer = ""  // Clear the buffer
         streamingBufferLock.signal()
 
-        // Get all sentences including any incomplete final one
-        let sentences = useLegacySentenceSplit ?
-            SentenceTokenizer.splitIntoSentencesLegacy(text: fullBuffer) :
-            SentenceTokenizer.splitIntoSentences(text: fullBuffer)
-
-        // Process any remaining unprocessed sentences
-        let remainingText = sentences.count > currentProcessedCount ?
-            sentences[currentProcessedCount...].joined(separator: " ") : ""
-
         if !remainingText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            let finalSentence = remainingText.trimmingCharacters(in: .whitespacesAndNewlines)
+
+            // Increment counter synchronously to ensure correct ordering
+            self.sentenceCounter += 1
+            let sentenceNum = self.sentenceCounter
+
+            // Update total expected sentences
+            self.totalSentencesExpected = sentenceNum
+
             streamingQueue.async {
-                self.sentenceCounter += 1
-                let sentenceNum = self.sentenceCounter
-                let finalSentence = remainingText.trimmingCharacters(in: .whitespacesAndNewlines)
-
                 print("[STREAMING V2] Processing final sentence #\(sentenceNum): '\(finalSentence)'")
-
-                // Update total expected sentences
-                self.totalSentencesExpected = sentenceNum
 
                 // Track pending TTS
                 self.streamingState.incrementPending()
@@ -1269,12 +1402,6 @@ public class KokoroTTSModel: ObservableObject {
             // No final sentence to process
             totalSentencesExpected = sentenceCounter
         }
-
-        // Clear buffer and reset index
-        streamingBufferLock.wait()
-        streamingTextBuffer = ""
-        processedSentenceCount = 0
-        streamingBufferLock.signal()
 
         // Wait for all sentences to be processed before cleanup
         DispatchQueue.global(qos: .background).async { [weak self] in
@@ -1330,6 +1457,17 @@ public class KokoroTTSModel: ObservableObject {
                 if !isPlaying {
                     self.isAudioPlaying = false
                     self.generationInProgress = false
+
+                    // Calculate total completion time if not playing
+                    if let startTime = self.generationStartTime {
+                        self.totalCompletionTime = Date().timeIntervalSince(startTime)
+
+                        // Call completion callback
+                        if let callback = self.completionCallback {
+                            callback(self.totalGenerationTime, self.totalCompletionTime)
+                        }
+                    }
+
                     self.objectWillChange.send()
                 } else if self.playbackMonitorTimer == nil {
                     self.startPlaybackMonitoring()
@@ -1347,7 +1485,6 @@ public class KokoroTTSModel: ObservableObject {
 
             streamingBufferLock.wait()
             streamingTextBuffer = ""
-            processedSentenceCount = 0
             streamingBufferLock.signal()
 
             stopPlayback()

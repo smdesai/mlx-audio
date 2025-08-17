@@ -13,6 +13,8 @@
 		18D7A7B92DCDAB75005776E9 /* MLXLinalg in Frameworks */ = {isa = PBXBuildFile; productRef = 18D7A7B82DCDAB75005776E9 /* MLXLinalg */; };
 		18D7A7BB2DCDAB75005776E9 /* MLXNN in Frameworks */ = {isa = PBXBuildFile; productRef = 18D7A7BA2DCDAB75005776E9 /* MLXNN */; };
 		261E20862DAC272A000711D0 /* readme.md in Resources */ = {isa = PBXBuildFile; fileRef = 261E20852DAC2726000711D0 /* readme.md */; };
+		7B44760B2E302D1300B906A6 /* Transformers in Frameworks */ = {isa = PBXBuildFile; productRef = 7B44760A2E302D1300B906A6 /* Transformers */; };
+		7B44760D2E302DA900B906A6 /* Transformers in Frameworks */ = {isa = PBXBuildFile; productRef = 7B44760C2E302DA900B906A6 /* Transformers */; };
 		7BBF58192DDD07310047DCFF /* MLX in Frameworks */ = {isa = PBXBuildFile; productRef = 7BBF58182DDD07310047DCFF /* MLX */; };
 		7BBF581B2DDD074E0047DCFF /* MLXNN in Frameworks */ = {isa = PBXBuildFile; productRef = 7BBF581A2DDD074E0047DCFF /* MLXNN */; };
 		7BBF581D2DDD07610047DCFF /* MLXFFT in Frameworks */ = {isa = PBXBuildFile; productRef = 7BBF581C2DDD07610047DCFF /* MLXFFT */; };
@@ -66,6 +68,7 @@
 		261E20852DAC2726000711D0 /* readme.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = readme.md; sourceTree = "<group>"; };
 		264836192DAD10AA004DA2A4 /* Swift-TTS-Tests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "Swift-TTS-Tests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
 		26942CF62DABD3B400B82507 /* Swift-TTS.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Swift-TTS.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		7B9064122E4FE11C000C58D5 /* Swift-TTS.xcodeproj */ = {isa = PBXFileReference; lastKnownFileType = "wrapper.pb-project"; path = "Swift-TTS.xcodeproj"; sourceTree = SOURCE_ROOT; };
 		7BBF57E32DDD06460047DCFF /* Swift-TTS-iOS.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Swift-TTS-iOS.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -188,6 +191,7 @@
 				Kokoro/TTSEngine/ProsodyPredictor.swift,
 				Kokoro/TTSEngine/TextEncoder.swift,
 				Kokoro/TTSEngine/VoiceLoader.swift,
+				Kokoro/TTSPerformanceMetrics.swift,
 				Kokoro/Utils/AudioUtils.swift,
 				Kokoro/Utils/BenchmarkTimer.swift,
 				Utils/AudioSessionManager.swift,
@@ -280,6 +284,7 @@
 			files = (
 				18D7A7BB2DCDAB75005776E9 /* MLXNN in Frameworks */,
 				18D7A7B92DCDAB75005776E9 /* MLXLinalg in Frameworks */,
+				7B44760B2E302D1300B906A6 /* Transformers in Frameworks */,
 				18D7A7B32DCDAB75005776E9 /* MLX in Frameworks */,
 				18D7A7B72DCDAB75005776E9 /* MLXFast in Frameworks */,
 				18D7A7B52DCDAB75005776E9 /* MLXFFT in Frameworks */,
@@ -290,6 +295,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				7B44760D2E302DA900B906A6 /* Transformers in Frameworks */,
 				7BBF581B2DDD074E0047DCFF /* MLXNN in Frameworks */,
 				7BBF58192DDD07310047DCFF /* MLX in Frameworks */,
 				7BBF581F2DDD07680047DCFF /* MLXFast in Frameworks */,
@@ -311,6 +317,7 @@
 			isa = PBXGroup;
 			children = (
 				261E20852DAC2726000711D0 /* readme.md */,
+				7B9064122E4FE11C000C58D5 /* Swift-TTS.xcodeproj */,
 				26942CF82DABD3B400B82507 /* Swift-TTS */,
 				2648361A2DAD10AA004DA2A4 /* Tests */,
 				7BBF57E42DDD06460047DCFF /* Swift-TTS-iOS */,
@@ -379,6 +386,7 @@
 				18D7A7B62DCDAB75005776E9 /* MLXFast */,
 				18D7A7B82DCDAB75005776E9 /* MLXLinalg */,
 				18D7A7BA2DCDAB75005776E9 /* MLXNN */,
+				7B44760A2E302D1300B906A6 /* Transformers */,
 			);
 			productName = "Swift-TTS";
 			productReference = 26942CF62DABD3B400B82507 /* Swift-TTS.app */;
@@ -406,6 +414,7 @@
 				7BBF581A2DDD074E0047DCFF /* MLXNN */,
 				7BBF581C2DDD07610047DCFF /* MLXFFT */,
 				7BBF581E2DDD07680047DCFF /* MLXFast */,
+				7B44760C2E302DA900B906A6 /* Transformers */,
 			);
 			productName = "Swift-TTS-iOS";
 			productReference = 7BBF57E32DDD06460047DCFF /* Swift-TTS-iOS.app */;
@@ -444,6 +453,7 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				18D7A7B12DCDAB75005776E9 /* XCRemoteSwiftPackageReference "mlx-swift" */,
+				7B4476092E302D1300B906A6 /* XCRemoteSwiftPackageReference "swift-transformers" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 26942CF72DABD3B400B82507 /* Products */;
@@ -731,9 +741,10 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = "Swift-TTS-iOS/Swift-TTS-iOS.entitlements";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = "";
+				DEVELOPMENT_TEAM = TA92TEWDS4;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				HEADER_SEARCH_PATHS = "$(PROJECT_DIR)/Frameworks/SentenceSegmentKit/Bridge";
@@ -748,7 +759,7 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = "com.lumen-digital.Swift-TTS-iOS";
+				PRODUCT_BUNDLE_IDENTIFIER = "com.sdesai.lumen-digital.Swift-TTS-iOS";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -762,9 +773,10 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = "Swift-TTS-iOS/Swift-TTS-iOS.entitlements";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = "";
+				DEVELOPMENT_TEAM = TA92TEWDS4;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				HEADER_SEARCH_PATHS = "$(PROJECT_DIR)/Frameworks/SentenceSegmentKit/Bridge";
@@ -779,7 +791,7 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = "com.lumen-digital.Swift-TTS-iOS";
+				PRODUCT_BUNDLE_IDENTIFIER = "com.sdesai.lumen-digital.Swift-TTS-iOS";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -839,6 +851,14 @@
 				minimumVersion = 0.25.2;
 			};
 		};
+		7B4476092E302D1300B906A6 /* XCRemoteSwiftPackageReference "swift-transformers" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/huggingface/swift-transformers.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 0.1.22;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -866,6 +886,16 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 18D7A7B12DCDAB75005776E9 /* XCRemoteSwiftPackageReference "mlx-swift" */;
 			productName = MLXNN;
+		};
+		7B44760A2E302D1300B906A6 /* Transformers */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 7B4476092E302D1300B906A6 /* XCRemoteSwiftPackageReference "swift-transformers" */;
+			productName = Transformers;
+		};
+		7B44760C2E302DA900B906A6 /* Transformers */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 7B4476092E302D1300B906A6 /* XCRemoteSwiftPackageReference "swift-transformers" */;
+			productName = Transformers;
 		};
 		7BBF58182DDD07310047DCFF /* MLX */ = {
 			isa = XCSwiftPackageProductDependency;

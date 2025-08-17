@@ -40,11 +40,11 @@ public final class SentenceTokenizer {
 
     // MARK: - Initial Split
 
-    public static func splitIntoSentences(text: String) -> [String] {
+    public static func splitIntoSentences(text: String, threshold: Float? = nil) -> [String] {
         guard !text.isEmpty else { return [] }
 
         let detectedLanguage = detectLanguage(text: text)
-        let initialSentences = performInitialSplit(text: text, language: detectedLanguage)
+        let initialSentences = performInitialSplit(text: text, language: detectedLanguage, threshold: threshold)
         let refinedSentences = applyTTSRefinements(sentences: initialSentences, originalText: text)
         
         return refinedSentences
@@ -60,9 +60,9 @@ public final class SentenceTokenizer {
         return optimizeTTSChunks(sentences: refinedSentences, language: detectedLanguage)
     }
 
-    private static func performInitialSplit(text: String, language: NLLanguage?) -> [String] {
-        let sentences = Self.segmenter.splitSentences(text)
-        print("Sentences:")
+    private static func performInitialSplit(text: String, language: NLLanguage?, threshold: Float? = nil) -> [String] {
+        let sentences = Self.segmenter.splitSentences(text, threshold: threshold)
+        print("Sentences (threshold: \(threshold ?? 0.5)):")
         for (i, sentence) in sentences.enumerated() {
             print("  \(i + 1): \(sentence)")
         }

@@ -1,6 +1,8 @@
 //
-//  Kokoro-tts-lib
+//  Tokenizer.swift
+//  Swift-TTS
 //
+
 import Foundation
 
 // Utility class for tokenizing the phonemized text

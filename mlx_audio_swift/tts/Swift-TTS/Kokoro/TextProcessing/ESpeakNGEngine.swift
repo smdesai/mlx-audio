@@ -1,9 +1,8 @@
-//
-import ESpeakNG
-
 //  Kokoro-tts-lib
 //
+
 import Foundation
+import ESpeakNG
 
 // ESpeakNG wrapper for phonemizing the text strings
 final class ESpeakNGEngine {

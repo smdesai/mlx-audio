@@ -20,7 +20,7 @@ struct ContentView: View {
     @FocusState private var isTextEditorFocused: Bool
     @ObservedObject var viewModel: KokoroTTSModel
     @StateObject private var speakerModel = SpeakerViewModel()
-    
+
     @Environment(\.colorScheme) var colorScheme
 
     var body: some View {
@@ -41,17 +41,17 @@ struct ContentView: View {
                     VStack(spacing: 20) {
                         // Header card
                         headerCard
-                        
+
                         VStack(spacing: 10) {
                             // Speaker selection card
                             speakerCard
-                            
+
                             // Settings card
                             settingsCard
-                            
+
                             // Text input card
                             textInputCard
-                            
+
                             // Action buttons
                             actionButtonsView
                         }
@@ -89,9 +89,9 @@ struct ContentView: View {
             }
         }
     }
-    
+
     // MARK: - Header Card
-    
+
     private var headerCard: some View {
         VStack(spacing: 12) {
             // Logo/Icon
@@ -99,44 +99,64 @@ struct ContentView: View {
                 .font(.system(size: 60))
                 .foregroundStyle(.tint)
                 .symbolEffect(.pulse, isActive: viewModel.isAudioPlaying)
-            
+
             HStack(spacing: 8) {
                 Text("Kokoro TTS")
                     .font(.largeTitle)
                     .fontWeight(.bold)
-                
+
                 if !isModelReady {
                     ProgressView()
                         .controlSize(.small)
                         .transition(.opacity)
                 }
             }
-            
-            // Performance metric
-            HStack {
-                Image(systemName: "timer")
-                    .font(.caption)
-                Text("Time to first audio: \(viewModel.audioGenerationTime > 0 ? String(format: "%.2f", viewModel.audioGenerationTime) : "--")s")
-                    .font(.caption)
+
+            // Performance metrics
+            VStack(spacing: 8) {
+                HStack {
+                    Image(systemName: "timer")
+                        .font(.caption)
+                    Text("Time to first audio: \(viewModel.audioGenerationTime > 0 ? String(format: "%.2f", viewModel.audioGenerationTime) : "--")s")
+                        .font(.caption)
+                }
+
+                if viewModel.totalGenerationTime > 0 {
+                    HStack {
+                        Image(systemName: "waveform.badge.magnifyingglass")
+                            .font(.caption)
+                        Text("Total generation: \(String(format: "%.2f", viewModel.totalGenerationTime))s")
+                            .font(.caption)
+                    }
+                }
+
+                if viewModel.totalCompletionTime > 0 {
+                    HStack {
+                        Image(systemName: "checkmark.circle")
+                            .font(.caption)
+                        Text("Total completion: \(String(format: "%.2f", viewModel.totalCompletionTime))s")
+                            .font(.caption)
+                    }
+                }
             }
             .foregroundStyle(.secondary)
             .padding(.horizontal, 16)
             .padding(.vertical, 8)
             .background(
-                Capsule()
+                RoundedRectangle(cornerRadius: 12)
                     .fill(Color(.tertiarySystemBackground))
             )
         }
         .padding(.vertical)
     }
-    
+
     // MARK: - Speaker Card
-    
+
     private var speakerCard: some View {
         VStack(alignment: .leading, spacing: 16) {
             Label("Voice Selection", systemImage: "person.wave.2")
                 .font(.headline)
-            
+
             Menu {
                 ForEach(speakerModel.speakers) { speaker in
                     Button(action: {
@@ -163,7 +183,7 @@ struct ContentView: View {
                             Text(speaker.flag)
                                 .font(.title2)
                         }
-                        
+
                         VStack(alignment: .leading, spacing: 4) {
                             Text(speaker.displayName)
                                 .font(.headline)
@@ -173,9 +193,9 @@ struct ContentView: View {
                                 .foregroundStyle(.secondary)
                         }
                     }
-                    
+
                     Spacer()
-                    
+
                     Image(systemName: "chevron.down.circle.fill")
                         .font(.title2)
                         .foregroundStyle(.secondary)
@@ -199,9 +219,9 @@ struct ContentView: View {
                 .shadow(color: Color.black.opacity(0.05), radius: 10, y: 5)
         )
     }
-    
+
     // MARK: - Settings Card
-    
+
     private var settingsCard: some View {
         VStack(alignment: .leading, spacing: 16) {
             // Header with expandable button
@@ -219,7 +239,7 @@ struct ContentView: View {
                 }
             }
             .foregroundStyle(.primary)
-            
+
             if showSettings {
                 VStack(spacing: 20) {
                     // Speed control
@@ -239,24 +259,24 @@ struct ContentView: View {
                                         .fill(Color(.tertiarySystemBackground))
                                 )
                         }
-                        
+
                         HStack(spacing: 8) {
                             Image(systemName: "tortoise.fill")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
-                            
+
                             Slider(value: $speed, in: 0.5...2.0, step: 0.1)
                                 .tint(.accentColor)
-                            
+
                             Image(systemName: "hare.fill")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
                         .disabled(viewModel.generationInProgress)
                     }
-                    
+
                     Divider()
-                    
+
                     // Streaming mode toggle
                     Toggle(isOn: $isStreamingMode) {
                         HStack {
@@ -273,7 +293,47 @@ struct ContentView: View {
                     }
                     .tint(.accentColor)
                     .disabled(viewModel.generationInProgress || viewModel.isStreaming)
-                    
+
+                    // Sentence threshold slider (only shown when streaming mode is on and not using legacy split)
+                    if isStreamingMode && !viewModel.useLegacySentenceSplit {
+                        VStack(alignment: .leading, spacing: 12) {
+                            HStack {
+                                Label("Sentence Threshold", systemImage: "text.badge.checkmark")
+                                    .font(.subheadline)
+                                    .foregroundStyle(.secondary)
+                                Spacer()
+                                Text(String(format: "%.1f", viewModel.streamingSentenceThreshold))
+                                    .font(.headline)
+                                    .foregroundStyle(.tint)
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 4)
+                                    .background(
+                                        Capsule()
+                                            .fill(Color(.tertiarySystemBackground))
+                                    )
+                            }
+
+                            HStack(spacing: 8) {
+                                Text("0.1")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+
+                                Slider(value: $viewModel.streamingSentenceThreshold, in: 0.1...1.0, step: 0.1)
+                                    .tint(.accentColor)
+
+                                Text("1.0")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
+                            .disabled(viewModel.generationInProgress || viewModel.isStreaming)
+
+                            Text("Lower values split sentences more aggressively")
+                                .font(.caption)
+                                .foregroundStyle(.tertiary)
+                        }
+                        .transition(.opacity.combined(with: .move(edge: .top)))
+                    }
+
                     // Legacy sentence split toggle
                     Toggle(isOn: $viewModel.useLegacySentenceSplit) {
                         HStack {
@@ -303,9 +363,9 @@ struct ContentView: View {
         )
         .clipped()
     }
-    
+
     // MARK: - Text Input Card
-    
+
     private var textInputCard: some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack {
@@ -318,7 +378,7 @@ struct ContentView: View {
                         .foregroundStyle(.secondary)
                 }
             }
-            
+
             ZStack(alignment: .topLeading) {
                 TextEditor(text: $text)
                     .font(.body)
@@ -358,9 +418,9 @@ struct ContentView: View {
                 .shadow(color: Color.black.opacity(0.05), radius: 10, y: 5)
         )
     }
-    
+
     // MARK: - Action Buttons
-    
+
     private var actionButtonsView: some View {
         Button {
             withAnimation(.spring(response: 0.3)) {
@@ -377,7 +437,7 @@ struct ContentView: View {
                         dismissKeyboard()
                         isTextEditorFocused = false
                     }
-                    
+
                     if isStreamingMode {
                         startStreaming()
                     } else {
@@ -406,7 +466,7 @@ struct ContentView: View {
                 } else {
                     Image(systemName: isStreamingMode ? "dot.radiowaves.left.and.right" : "play.fill")
                 }
-                
+
                 Text(buttonText)
                     .fontWeight(.semibold)
             }
@@ -431,7 +491,7 @@ struct ContentView: View {
         .opacity(buttonEnabled ? 1.0 : 0.6)
         .animation(.easeInOut(duration: 0.2), value: viewModel.isAudioPlaying)
     }
-    
+
     // Helper computed properties for button state
     private var buttonText: String {
         if viewModel.isAudioPlaying || viewModel.isStreaming {
@@ -444,7 +504,7 @@ struct ContentView: View {
             return "Generate"
         }
     }
-    
+
     private var buttonGradientColors: [Color] {
         if viewModel.isAudioPlaying || viewModel.isStreaming {
             return [Color.red, Color.red.opacity(0.8)]
@@ -452,7 +512,7 @@ struct ContentView: View {
             return [Color.accentColor, Color.accentColor.opacity(0.8)]
         }
     }
-    
+
     private var buttonShadowColor: Color {
         if viewModel.isAudioPlaying || viewModel.isStreaming {
             return Color.red.opacity(0.3)
@@ -460,7 +520,7 @@ struct ContentView: View {
             return Color.accentColor.opacity(0.3)
         }
     }
-    
+
     private var buttonEnabled: Bool {
         if viewModel.isAudioPlaying || viewModel.isStreaming {
             return true // Always enabled when playing/streaming so user can stop
