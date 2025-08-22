@@ -336,6 +336,11 @@
 			name = Products;
 			sourceTree = "<group>";
 		};
+		7B6C6EAA2E57FF6F000179E1 /* Products */ = {
+			isa = PBXGroup;
+			name = Products;
+			sourceTree = "<group>";
+		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
@@ -458,6 +463,12 @@
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 26942CF72DABD3B400B82507 /* Products */;
 			projectDirPath = "";
+			projectReferences = (
+				{
+					ProductGroup = 7B6C6EAA2E57FF6F000179E1 /* Products */;
+					ProjectRef = 7B9064122E4FE11C000C58D5 /* Swift-TTS.xcodeproj */;
+				},
+			);
 			projectRoot = "";
 			targets = (
 				26942CF52DABD3B400B82507 /* Swift-TTS */,

@@ -16,10 +16,15 @@ struct ContentView: View {
     @State private var streamingTimer: Timer?
     @State private var showSettings = false
     @State private var isModelReady = false
+    @State private var showFileManager = false
+    @State private var isSavingAudio = false
+    @State private var showSaveSuccess = false
+    @State private var lastSavedFileName = ""
 
     @FocusState private var isTextEditorFocused: Bool
     @ObservedObject var viewModel: KokoroTTSModel
     @StateObject private var speakerModel = SpeakerViewModel()
+    @StateObject private var audioFileManager = AudioFileManager()
 
     @Environment(\.colorScheme) var colorScheme
 
@@ -38,11 +43,11 @@ struct ContentView: View {
                 .ignoresSafeArea()
 
                 ScrollView(showsIndicators: false) {
-                    VStack(spacing: 20) {
+                    VStack(spacing: 12) {
                         // Header card
                         headerCard
 
-                        VStack(spacing: 10) {
+                        VStack(spacing: 8) {
                             // Speaker selection card
                             speakerCard
 
@@ -57,7 +62,7 @@ struct ContentView: View {
                         }
                         .padding(.horizontal)
                     }
-                    .padding(.bottom, 20)
+                    .padding(.bottom, 16)
                 }
                 .scrollContentBackground(.hidden)
                 .alert("Empty Text", isPresented: $showAlert) {
@@ -88,12 +93,57 @@ struct ContentView: View {
                 }
             }
         }
+        .sheet(isPresented: $showFileManager) {
+            FileManagementView()
+        }
+        .overlay {
+            if showSaveSuccess {
+                VStack {
+                    Spacer()
+                    HStack {
+                        Image(systemName: "checkmark.circle.fill")
+                        Text("Audio saved successfully!")
+                    }
+                    .font(.callout)
+                    .fontWeight(.medium)
+                    .foregroundColor(.white)
+                    .padding()
+                    .background(
+                        Capsule()
+                            .fill(Color.green)
+                            .shadow(radius: 4)
+                    )
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                    .padding(.bottom, 100)
+                }
+                .animation(.spring(), value: showSaveSuccess)
+            }
+        }
     }
 
     // MARK: - Header Card
 
     private var headerCard: some View {
         VStack(spacing: 12) {
+            // Top bar with file manager button
+            HStack {
+                Spacer()
+                Button(action: {
+                    showFileManager = true
+                }) {
+                    Label("Saved", systemImage: "folder.fill")
+                        .font(.caption)
+                        .foregroundStyle(.tint)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(
+                            Capsule()
+                                .fill(Color(.tertiarySystemBackground))
+                        )
+                }
+            }
+            .padding(.horizontal)
+
             // Logo/Icon
             Image(systemName: "waveform.circle.fill")
                 .font(.system(size: 60))
@@ -373,43 +423,60 @@ struct ContentView: View {
                     .font(.headline)
                 Spacer()
                 if !text.isEmpty {
-                    Text("\(text.count) characters")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-
-            ZStack(alignment: .topLeading) {
-                TextEditor(text: $text)
-                    .font(.body)
-                    .frame(minHeight: 150)
-                    .scrollContentBackground(.hidden)
-                    .padding(12)
-                    .background(
-                        RoundedRectangle(cornerRadius: 16)
-                            .fill(Color(.secondarySystemBackground))
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 16)
-                            .stroke(isTextEditorFocused ? Color.accentColor : Color(.separator), lineWidth: isTextEditorFocused ? 2 : 0.5)
-                    )
-                    .focused($isTextEditorFocused)
-                    .disabled(viewModel.generationInProgress)
-                    .animation(.easeInOut(duration: 0.2), value: isTextEditorFocused)
-
-                if text.isEmpty && !isTextEditorFocused {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Enter your text here...")
-                            .foregroundStyle(.secondary)
-                        Text("Tip: Try different voices and speeds!")
+                    HStack(spacing: 12) {
+                        Text("\(text.count) characters")
                             .font(.caption)
-                            .foregroundStyle(.tertiary)
+                            .foregroundStyle(.secondary)
+
+                        Button(action: {
+                            withAnimation(.easeInOut(duration: 0.2)) {
+                                text = ""
+                            }
+                        }) {
+                            Text("Clear")
+                                .font(.caption)
+                                .fontWeight(.medium)
+                                .foregroundStyle(.tint)
+                        }
+                        .disabled(viewModel.generationInProgress)
                     }
-                    .padding(.horizontal, 16)
-                    .padding(.top, 20)
-                    .allowsHitTesting(false)
                 }
             }
+
+            ScrollView {
+                ZStack(alignment: .topLeading) {
+                    TextEditor(text: $text)
+                        .font(.body)
+                        .frame(minHeight: 180, maxHeight: 250)
+                        .scrollContentBackground(.hidden)
+                        .padding(12)
+                        .background(
+                            RoundedRectangle(cornerRadius: 16)
+                                .fill(Color(.secondarySystemBackground))
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 16)
+                                .stroke(isTextEditorFocused ? Color.accentColor : Color(.separator), lineWidth: isTextEditorFocused ? 2 : 0.5)
+                        )
+                        .focused($isTextEditorFocused)
+                        .disabled(viewModel.generationInProgress)
+                        .animation(.easeInOut(duration: 0.2), value: isTextEditorFocused)
+
+                    if text.isEmpty && !isTextEditorFocused {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Enter your text here...")
+                                .foregroundStyle(.secondary)
+                            Text("Tip: Try different voices and speeds!")
+                                .font(.caption)
+                                .foregroundStyle(.tertiary)
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.top, 20)
+                        .allowsHitTesting(false)
+                    }
+                }
+            }
+            .frame(maxHeight: 250)
         }
         .padding()
         .background(
@@ -422,6 +489,17 @@ struct ContentView: View {
     // MARK: - Action Buttons
 
     private var actionButtonsView: some View {
+        HStack(spacing: 12) {
+            // Generate/Play button
+            generateButton
+
+            // Save to File button
+            saveButton
+        }
+        .padding(.horizontal, 16)
+    }
+
+    private var generateButton: some View {
         Button {
             withAnimation(.spring(response: 0.3)) {
                 if viewModel.generationInProgress || viewModel.isStreaming || viewModel.isAudioPlaying {
@@ -485,11 +563,108 @@ struct ContentView: View {
                     .shadow(color: buttonShadowColor, radius: 8, y: 4)
             )
         }
-        .padding(.leading, 16)
-        .padding(.trailing, 16)
         .disabled(!buttonEnabled)
         .opacity(buttonEnabled ? 1.0 : 0.6)
         .animation(.easeInOut(duration: 0.2), value: viewModel.isAudioPlaying)
+    }
+
+    private var saveButton: some View {
+        Button {
+            withAnimation(.spring(response: 0.3)) {
+                if isSavingAudio || viewModel.generationInProgress {
+                    // Already saving or generating, do nothing
+                    return
+                }
+
+                let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !t.isEmpty else {
+                    showAlert = true
+                    return
+                }
+
+                // Start saving
+                isSavingAudio = true
+                let speaker = speakerModel.getPrimarySpeaker().first!
+                let voice = TTSVoice.fromIdentifier(speaker.name) ?? .afHeart
+
+                // Generate and save to file
+                viewModel.generateAndSaveToFile(t, voice, speed: Float(speed)) { [weak audioFileManager] fileURL, generationTime, completionTime in
+                    guard let fileURL = fileURL else {
+                        // Handle error
+                        DispatchQueue.main.async {
+                            self.isSavingAudio = false
+                        }
+                        return
+                    }
+
+                    // Move file to permanent location and save metadata
+                    do {
+                        let fileData = try Data(contentsOf: fileURL)
+
+                        // Create display name from first few words of text
+                        let displayName = String(t.prefix(50))
+
+                        let savedFile = try audioFileManager?.saveAudioFile(
+                            audioData: fileData,
+                            displayName: displayName,
+                            voiceUsed: speaker.name,
+                            speed: Float(self.speed),
+                            generationTime: generationTime,
+                            completionTime: completionTime
+                        )
+
+                        // Clean up temp file
+                        try? FileManager.default.removeItem(at: fileURL)
+
+                        DispatchQueue.main.async {
+                            self.isSavingAudio = false
+                            self.lastSavedFileName = savedFile?.displayName ?? "Audio"
+                            self.showSaveSuccess = true
+
+                            // Hide success message after 2 seconds
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+                                self.showSaveSuccess = false
+                            }
+                        }
+                    } catch {
+                        print("Failed to save audio file: \(error)")
+                        DispatchQueue.main.async {
+                            self.isSavingAudio = false
+                        }
+                    }
+                }
+            }
+        } label: {
+            HStack(spacing: 8) {
+                if isSavingAudio || (viewModel.generationInProgress && !viewModel.isAudioPlaying) {
+                    ProgressView()
+                        .controlSize(.small)
+                        .tint(.white)
+                } else {
+                    Image(systemName: "square.and.arrow.down")
+                }
+
+                Text(saveButtonText)
+                    .fontWeight(.semibold)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 16)
+            .foregroundColor(.white)
+            .background(
+                RoundedRectangle(cornerRadius: 16)
+                    .fill(
+                        LinearGradient(
+                            gradient: Gradient(colors: [Color.green, Color.green.opacity(0.8)]),
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .shadow(color: Color.green.opacity(0.3), radius: 8, y: 4)
+            )
+        }
+        .disabled(!saveButtonEnabled)
+        .opacity(saveButtonEnabled ? 1.0 : 0.6)
+        .animation(.easeInOut(duration: 0.2), value: isSavingAudio)
     }
 
     // Helper computed properties for button state
@@ -527,6 +702,20 @@ struct ContentView: View {
         } else {
             return !viewModel.generationInProgress && !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         }
+    }
+
+    private var saveButtonText: String {
+        if isSavingAudio {
+            return "Saving..."
+        } else if showSaveSuccess {
+            return "Saved"
+        } else {
+            return "Save Audio"
+        }
+    }
+
+    private var saveButtonEnabled: Bool {
+        !isSavingAudio && !viewModel.generationInProgress && !viewModel.isAudioPlaying && !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     // MARK: - Streaming Methods

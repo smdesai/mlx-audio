@@ -125,18 +125,18 @@ public class KokoroTTSModel: ObservableObject {
 
     // Performance metrics
     @Published public var performanceMetrics = TTSPerformanceMetrics()
-    
+
     // Keep existing properties for backward compatibility
     @Published public var audioGenerationTime: TimeInterval = 0
     @Published public var totalGenerationTime: TimeInterval = 0
     @Published public var totalCompletionTime: TimeInterval = 0
-    
+
     private var generationStartTime: Date?
     private var allAudioGeneratedTime: Date?
 
     public typealias CompletionCallback = (TimeInterval, TimeInterval) -> Void
     private var completionCallback: CompletionCallback?
-    
+
     // New callback with metrics
     public typealias MetricsCompletionCallback = (TTSPerformanceMetrics) -> Void
     private var metricsCompletionCallback: MetricsCompletionCallback?
@@ -318,7 +318,7 @@ public class KokoroTTSModel: ObservableObject {
     public func setCompletionCallback(_ callback: CompletionCallback?) {
         self.completionCallback = callback
     }
-    
+
     public func setMetricsCompletionCallback(_ callback: MetricsCompletionCallback?) {
         self.metricsCompletionCallback = callback
     }
@@ -341,7 +341,7 @@ public class KokoroTTSModel: ObservableObject {
          totalCompletionTime = 0.0
          generationStartTime = Date()
          allAudioGeneratedTime = nil
-         
+
          // Also update new metrics
          performanceMetrics.startGeneration()
          performanceMetrics.addProcessedText(trimmedText)
@@ -458,6 +458,439 @@ public class KokoroTTSModel: ObservableObject {
          }
      }
 
+    // MARK: - Save to File Support
+
+    // Helper structure to track chunk metadata
+    private struct ChunkMetadata {
+        let chunkNum: Int
+        let sampleCount: Int
+        let fileName: String
+        let audioData: Data?  // Optional: store in memory for small files
+    }
+
+    public func generateAndSaveToFile(_ text: String, _ voice: TTSVoice, speed: Float = 1.0, completion: @escaping (URL?, TimeInterval, TimeInterval) -> Void) {
+        // Check if app is active
+        guard isAppActive else {
+            print("App is not active - ignoring TTS request")
+            completion(nil, 0, 0)
+            return
+        }
+
+        let trimmedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedText.isEmpty else {
+            completion(nil, 0, 0)
+            return
+        }
+
+        // Reset timing metrics
+        audioGenerationTime = 0.0
+        totalGenerationTime = 0.0
+        totalCompletionTime = 0.0
+        generationStartTime = Date()
+        allAudioGeneratedTime = nil
+
+        // Also update new metrics
+        performanceMetrics.startGeneration()
+        performanceMetrics.addProcessedText(trimmedText)
+
+        // Set state at start
+        DispatchQueue.main.async {
+            self.generationInProgress = true
+            self.isGenerating = true
+            self.objectWillChange.send()
+        }
+
+        // Create temporary directory for chunk files
+        let tempDirectory = FileManager.default.temporaryDirectory
+        let sessionID = UUID().uuidString
+        let chunkDirectory = tempDirectory.appendingPathComponent("audio_chunks_\(sessionID)")
+
+        // Create the chunk directory
+        do {
+            try FileManager.default.createDirectory(at: chunkDirectory, withIntermediateDirectories: true)
+            print("[Save] Created chunk directory: \(chunkDirectory.path)")
+        } catch {
+            print("[Save] Failed to create chunk directory: \(error)")
+            DispatchQueue.main.async {
+                self.isGenerating = false
+                self.generationInProgress = false
+                self.objectWillChange.send()
+            }
+            completion(nil, 0, 0)
+            return
+        }
+
+        // Final output file
+        let finalFileName = UUID().uuidString + ".wav"
+        let finalFileURL = tempDirectory.appendingPathComponent(finalFileName)
+
+        let generationStartTime = Date()
+        var totalSampleCount = 0
+
+        // Track chunk order
+        var chunkCounter = 0
+        let chunkCounterLock = DispatchSemaphore(value: 1)
+
+        // Track chunk metadata instead of storing data
+        var chunkMetadata: [ChunkMetadata] = []
+        let metadataLock = DispatchSemaphore(value: 1)
+
+        // First, split text into sentences to know how many chunks to expect
+        let sentences = useLegacySentenceSplit ?
+            SentenceTokenizer.splitIntoSentencesLegacy(text: trimmedText) :
+            SentenceTokenizer.splitIntoSentences(text: trimmedText)
+
+        guard !sentences.isEmpty else {
+            print("[Save] No sentences to process")
+            try? FileManager.default.removeItem(at: chunkDirectory)
+            DispatchQueue.main.async {
+                self.isGenerating = false
+                self.generationInProgress = false
+                self.objectWillChange.send()
+            }
+            completion(nil, 0, 0)
+            return
+        }
+
+        print("[Save] Processing \(sentences.count) sentences")
+
+        // Track how many chunks we've received - protected by lock for thread safety
+        var chunksReceived = 0
+        let chunksReceivedLock = DispatchSemaphore(value: 1)
+        let totalExpectedChunks = sentences.count
+        let generationComplete = DispatchSemaphore(value: 0)
+        var isTimedOut = false  // Flag to prevent writes after timeout
+
+        // Process everything on a background queue to avoid blocking main thread
+        DispatchQueue.global(qos: .userInitiated).async {
+            // Use streaming by sentence approach
+            // IMPORTANT: generateAudio processes sentences sequentially and calls the callback
+            // in order, but callbacks may execute on different threads
+            do {
+                try self.kokoroTTSEngine.generateAudio(
+                    voice: voice,
+                    text: trimmedText,
+                    speed: speed,
+                    useLegacySentenceSplit: self.useLegacySentenceSplit
+                ) { audioBuffer in
+
+                // Assign chunk number immediately to preserve order
+                chunkCounterLock.wait()
+                let currentChunkNum = chunkCounter
+                chunkCounter += 1
+                chunkCounterLock.signal()
+
+                // Update generation time on first chunk
+                if self.audioGenerationTime == 0.0 {
+                    self.audioGenerationTime = Date().timeIntervalSince(generationStartTime)
+                }
+
+                // Update total generation time on each chunk
+                if let startTime = self.generationStartTime {
+                    self.allAudioGeneratedTime = Date()
+                    let newGenerationTime = self.allAudioGeneratedTime!.timeIntervalSince(startTime)
+                    DispatchQueue.main.async {
+                        self.totalGenerationTime = newGenerationTime
+                    }
+                }
+
+                // Also update new metrics
+                if self.performanceMetrics.timeToFirstAudio == 0.0 {
+                    self.performanceMetrics.recordFirstAudio()
+                }
+                self.performanceMetrics.recordGenerationProgress()
+                self.performanceMetrics.addAudioChunk()
+
+                // Check if we've timed out - if so, skip writing
+                guard !isTimedOut else {
+                    print("[Save] Skipping chunk #\(currentChunkNum) - generation timed out")
+                    return
+                }
+
+                // Extract and convert audio data
+                let (frameCount, audioData) = self.extractAudioData(from: audioBuffer)
+                if frameCount > 0 {
+                    if let chunkData = self.convertSamplesToData(audioData) {
+                        let chunkSampleCount = audioData.count
+
+                        // Write chunk to individual file immediately
+                        let chunkFileName = String(format: "chunk_%03d.raw", currentChunkNum)
+                        let chunkFileURL = chunkDirectory.appendingPathComponent(chunkFileName)
+
+                        do {
+                            try chunkData.write(to: chunkFileURL)
+
+                            // Track metadata
+                            metadataLock.wait()
+                            chunkMetadata.append(ChunkMetadata(
+                                chunkNum: currentChunkNum,
+                                sampleCount: chunkSampleCount,
+                                fileName: chunkFileName,
+                                audioData: nil  // Don't store in memory for file-based approach
+                            ))
+                            totalSampleCount += chunkSampleCount
+                            metadataLock.signal()
+
+                            // Update chunks received counter thread-safely
+                            chunksReceivedLock.wait()
+                            chunksReceived += 1
+                            let currentChunksReceived = chunksReceived
+                            chunksReceivedLock.signal()
+
+                            print("[Save] Written chunk #\(currentChunkNum) to file: \(chunkFileName) (\(chunkSampleCount) samples, \(currentChunksReceived)/\(totalExpectedChunks))")
+
+                            // Signal completion when all chunks are received
+                            print("[Save] DEBUG: chunksReceived=\(currentChunksReceived), totalExpectedChunks=\(totalExpectedChunks)")
+                            if currentChunksReceived >= totalExpectedChunks {
+                                print("[Save] All chunks received (\(currentChunksReceived)/\(totalExpectedChunks)), signaling completion")
+                                generationComplete.signal()
+                                print("[Save] Completion signal sent")
+                            } else {
+                                print("[Save] Still waiting for chunks: \(currentChunksReceived)/\(totalExpectedChunks)")
+                            }
+                        } catch {
+                            print("[Save] Failed to write chunk #\(currentChunkNum): \(error)")
+                        }
+                    }
+                }
+            }
+
+            } catch {
+                print("[Save] Generation failed: \(error)")
+                DispatchQueue.main.async {
+                    self.isGenerating = false
+                    self.generationInProgress = false
+                    self.objectWillChange.send()
+                }
+                completion(nil, 0, 0)
+                return
+            }
+
+            // Wait for generation to complete with timeout
+            // Calculate dynamic timeout based on number of chunks (approximately 1.5 seconds per chunk for optimization)
+            let timeoutSeconds = max(120, Int(Double(totalExpectedChunks) * 1.5))
+            print("[Save] Waiting for audio generation to complete (expecting \(totalExpectedChunks) chunks, timeout: \(timeoutSeconds)s)...")
+            let timeout = DispatchTime.now() + .seconds(timeoutSeconds)
+            let result = generationComplete.wait(timeout: timeout)
+
+            if result == .timedOut {
+                print("[Save] ERROR: Timed out waiting for audio generation after \(timeoutSeconds) seconds!")
+                isTimedOut = true  // Set flag to prevent further writes
+
+                chunksReceivedLock.wait()
+                let finalChunksReceived = chunksReceived
+                chunksReceivedLock.signal()
+                print("[Save] Chunks received: \(finalChunksReceived)/\(totalExpectedChunks)")
+
+                // Don't delete directory yet - let remaining chunks fail gracefully
+                // We'll try to combine what we have
+                print("[Save] Attempting to combine \(finalChunksReceived) chunks that were successfully written...")
+            }
+
+            print("[Save] Semaphore signaled successfully - generation complete")
+
+            print("[Save] Audio generation completed - proceeding to combine chunks")
+
+            // Sort metadata by chunk number to ensure correct order
+            metadataLock.wait()
+            chunkMetadata.sort { $0.chunkNum < $1.chunkNum }
+            let actualChunksWritten = chunkMetadata.count
+            let actualSampleCount = totalSampleCount
+            metadataLock.signal()
+
+            print("[Save] Total chunks written: \(actualChunksWritten), Total samples: \(actualSampleCount)")
+
+            // Check if we have any chunks
+            guard actualChunksWritten > 0 && actualSampleCount > 0 else {
+                print("[Save] No audio data to save!")
+                try? FileManager.default.removeItem(at: chunkDirectory)
+                DispatchQueue.main.async {
+                    self.isGenerating = false
+                    self.generationInProgress = false
+                    self.objectWillChange.send()
+                }
+                completion(nil, 0, 0)
+                return
+            }
+
+            // If we have a partial file due to timeout, warn but continue
+            if isTimedOut && actualChunksWritten < totalExpectedChunks {
+                print("[Save] WARNING: Creating partial audio file with \(actualChunksWritten)/\(totalExpectedChunks) chunks")
+            }
+
+            print("[Save] Combining \(chunkMetadata.count) chunk files into final WAV...")
+
+            // Combine chunks into final WAV file
+            do {
+                // Create the final file
+                guard FileManager.default.createFile(atPath: finalFileURL.path, contents: nil) else {
+                    print("[Save] ERROR: Failed to create final audio file")
+                    try? FileManager.default.removeItem(at: chunkDirectory)
+                    DispatchQueue.main.async {
+                        self.isGenerating = false
+                        self.generationInProgress = false
+                        self.objectWillChange.send()
+                    }
+                    completion(nil, 0, 0)
+                    return
+                }
+
+                let fileHandle = try FileHandle(forWritingTo: finalFileURL)
+
+                // Write WAV header with actual sample count
+                let headerData = self.createWAVHeader(sampleCount: actualSampleCount, sampleRate: KokoroTTS.Constants.sampleRate)
+                fileHandle.write(headerData)
+                print("[Save] WAV header written: \(headerData.count) bytes for \(actualSampleCount) samples")
+
+                // Read and write chunks - check if we have in-memory data first
+                var chunksProcessed = 0
+                for metadata in chunkMetadata {
+                    autoreleasepool {
+                        if let audioData = metadata.audioData {
+                            // Use in-memory data if available (faster)
+                            fileHandle.write(audioData)
+                            chunksProcessed += 1
+                        } else if !metadata.fileName.isEmpty {
+                            // Fall back to reading from file
+                            let chunkFileURL = chunkDirectory.appendingPathComponent(metadata.fileName)
+                            if let chunkData = try? Data(contentsOf: chunkFileURL) {
+                                fileHandle.write(chunkData)
+                                chunksProcessed += 1
+                            } else {
+                                print("[Save] Warning: Could not read chunk file: \(metadata.fileName)")
+                            }
+                        }
+
+                        if chunksProcessed % 10 == 0 {
+                            print("[Save] Progress: \(chunksProcessed)/\(chunkMetadata.count) chunks combined")
+                        }
+                    }
+                }
+
+                fileHandle.closeFile()
+                print("[Save] All chunks combined successfully")
+
+                // Verify final file
+                let fileAttributes = try FileManager.default.attributesOfItem(atPath: finalFileURL.path)
+                let fileSize = fileAttributes[.size] as? Int64 ?? 0
+                print("[Save] Final file size: \(fileSize) bytes")
+
+                // Clean up chunk directory if it exists
+                if FileManager.default.fileExists(atPath: chunkDirectory.path) {
+                    print("[Save] Cleaning up temporary chunk files...")
+                    try? FileManager.default.removeItem(at: chunkDirectory)
+                    print("[Save] Cleanup complete")
+                }
+
+            } catch {
+                print("[Save] ERROR combining chunks: \(error)")
+                try? FileManager.default.removeItem(at: chunkDirectory)
+                DispatchQueue.main.async {
+                    self.isGenerating = false
+                    self.generationInProgress = false
+                    self.objectWillChange.send()
+                }
+                completion(nil, 0, 0)
+                return
+            }
+
+            // Mark completion time
+            let completionTime: TimeInterval
+            if let startTime = self.generationStartTime {
+                completionTime = Date().timeIntervalSince(startTime)
+            } else {
+                completionTime = 0
+            }
+
+            // Cache generation time for callback
+            let generationTime = self.totalGenerationTime
+
+            // Reset state and return file URL
+            print("[Save] Calling completion callback with file: \(finalFileURL.path)")
+            print("[Save] Generation time: \(generationTime), Completion time: \(completionTime)")
+
+            DispatchQueue.main.async {
+                // Update published properties on main thread
+                self.totalCompletionTime = completionTime
+                self.isGenerating = false
+                self.generationInProgress = false
+                self.objectWillChange.send()
+
+                // Call completion with file URL and timing metrics
+                print("[Save] Executing completion callback on main thread")
+                completion(finalFileURL, generationTime, completionTime)
+            }
+        }  // End of background queue async block
+    }
+
+    private func createWAVHeaderPlaceholder() -> Data {
+        // Create a placeholder WAV header with maximum possible size
+        // We'll update this later with the actual size
+        var data = Data()
+
+        // RIFF chunk
+        data.append("RIFF".data(using: .ascii)!)
+        data.append(Data(repeating: 0xFF, count: 4)) // Placeholder for file size
+        data.append("WAVE".data(using: .ascii)!)
+
+        // fmt chunk
+        data.append("fmt ".data(using: .ascii)!)
+        data.append(withUnsafeBytes(of: Int32(16).littleEndian) { Data($0) })
+        data.append(withUnsafeBytes(of: Int16(1).littleEndian) { Data($0) }) // PCM
+        data.append(withUnsafeBytes(of: Int16(1).littleEndian) { Data($0) }) // Mono
+        data.append(withUnsafeBytes(of: Int32(KokoroTTS.Constants.sampleRate).littleEndian) { Data($0) })
+        data.append(withUnsafeBytes(of: Int32(KokoroTTS.Constants.sampleRate * 2).littleEndian) { Data($0) }) // Byte rate
+        data.append(withUnsafeBytes(of: Int16(2).littleEndian) { Data($0) }) // Block align
+        data.append(withUnsafeBytes(of: Int16(16).littleEndian) { Data($0) }) // Bits per sample
+
+        // data chunk
+        data.append("data".data(using: .ascii)!)
+        data.append(Data(repeating: 0xFF, count: 4)) // Placeholder for data size
+
+        return data
+    }
+
+    private func createWAVHeader(sampleCount: Int, sampleRate: Int) -> Data {
+        var data = Data()
+
+        let dataSize = sampleCount * 2 // 16-bit samples
+        let fileSize = dataSize + 36
+
+        // RIFF chunk
+        data.append("RIFF".data(using: .ascii)!)
+        data.append(withUnsafeBytes(of: Int32(fileSize).littleEndian) { Data($0) })
+        data.append("WAVE".data(using: .ascii)!)
+
+        // fmt chunk
+        data.append("fmt ".data(using: .ascii)!)
+        data.append(withUnsafeBytes(of: Int32(16).littleEndian) { Data($0) })
+        data.append(withUnsafeBytes(of: Int16(1).littleEndian) { Data($0) }) // PCM
+        data.append(withUnsafeBytes(of: Int16(1).littleEndian) { Data($0) }) // Mono
+        data.append(withUnsafeBytes(of: Int32(sampleRate).littleEndian) { Data($0) })
+        data.append(withUnsafeBytes(of: Int32(sampleRate * 2).littleEndian) { Data($0) }) // Byte rate
+        data.append(withUnsafeBytes(of: Int16(2).littleEndian) { Data($0) }) // Block align
+        data.append(withUnsafeBytes(of: Int16(16).littleEndian) { Data($0) }) // Bits per sample
+
+        // data chunk
+        data.append("data".data(using: .ascii)!)
+        data.append(withUnsafeBytes(of: Int32(dataSize).littleEndian) { Data($0) })
+
+        return data
+    }
+
+    private func convertSamplesToData(_ samples: [Float]) -> Data? {
+        var data = Data()
+
+        // Convert float samples to 16-bit PCM
+        for sample in samples {
+            let clampedSample = max(-1.0, min(1.0, sample))
+            let int16Sample = Int16(clampedSample * Float(Int16.max))
+            data.append(withUnsafeBytes(of: int16Sample.littleEndian) { Data($0) })
+        }
+
+        return data
+    }
+
     // MARK: - Audio Generation and Playback
 
     private func startSpeechGeneration(text: String, voice: TTSVoice, speed: Float) {
@@ -490,13 +923,13 @@ public class KokoroTTSModel: ObservableObject {
                 if self.audioGenerationTime == 0.0 {
                     self.audioGenerationTime = Date().timeIntervalSince(generationStartTime)
                 }
-                
+
                 // Update total generation time on each chunk (will be accurate on last chunk)
                 if let startTime = self.generationStartTime {
                     self.allAudioGeneratedTime = Date()
                     self.totalGenerationTime = self.allAudioGeneratedTime!.timeIntervalSince(startTime)
                 }
-                
+
                 // Also update new metrics
                 if self.performanceMetrics.timeToFirstAudio == 0.0 {
                     self.performanceMetrics.recordFirstAudio()
@@ -848,7 +1281,7 @@ public class KokoroTTSModel: ObservableObject {
         totalCompletionTime = 0.0
         generationStartTime = Date()
         allAudioGeneratedTime = nil
-        
+
         // Also update new metrics
         performanceMetrics.startGeneration()
 
@@ -1205,7 +1638,7 @@ public class KokoroTTSModel: ObservableObject {
         totalCompletionTime = 0.0
         generationStartTime = Date()
         allAudioGeneratedTime = nil
-        
+
         // Also update new metrics
         performanceMetrics.startGeneration()
 
@@ -1336,7 +1769,7 @@ public class KokoroTTSModel: ObservableObject {
 
                 streamingQueue.async {
                     print("[STREAMING V2] Processing sentence #\(sentenceNum): '\(trimmed)'")
-                    
+
                     // Track in metrics
                     self.performanceMetrics.addProcessedText(trimmed)
 
