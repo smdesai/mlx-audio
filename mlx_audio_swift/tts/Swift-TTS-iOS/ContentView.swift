@@ -10,6 +10,8 @@ import MLX
 
 struct ContentView: View {
     @State private var speed = 1.0
+    @State private var sentenceSplitThreshold: Float = 0.01
+
     @State public var text = ""
     @State private var showAlert = false
     @State private var isStreamingMode = false
@@ -352,7 +354,7 @@ struct ContentView: View {
                                     .font(.subheadline)
                                     .foregroundStyle(.secondary)
                                 Spacer()
-                                Text(String(format: "%.1f", viewModel.streamingSentenceThreshold))
+                                Text(String(format: "%.1f", sentenceSplitThreshold))
                                     .font(.headline)
                                     .foregroundStyle(.tint)
                                     .padding(.horizontal, 12)
@@ -368,7 +370,7 @@ struct ContentView: View {
                                     .font(.caption2)
                                     .foregroundStyle(.secondary)
 
-                                Slider(value: $viewModel.streamingSentenceThreshold, in: 0.1...1.0, step: 0.1)
+                                Slider(value: $sentenceSplitThreshold, in: 0.1...1.0, step: 0.1)
                                     .tint(.accentColor)
 
                                 Text("1.0")
@@ -525,7 +527,7 @@ struct ContentView: View {
                             return
                         }
                         let speaker = speakerModel.getPrimarySpeaker().first!
-                        viewModel.say(t, TTSVoice.fromIdentifier(speaker.name) ?? .afHeart, speed: Float(speed))
+                        viewModel.say(t, TTSVoice.fromIdentifier(speaker.name) ?? .afHeart, speed: Float(speed), sentenceSplitTheshold: sentenceSplitThreshold)
                     }
                 }
             }
@@ -588,7 +590,7 @@ struct ContentView: View {
                 let voice = TTSVoice.fromIdentifier(speaker.name) ?? .afHeart
 
                 // Generate and save to file
-                viewModel.generateAndSaveToFile(t, voice, speed: Float(speed)) { [weak audioFileManager] fileURL, generationTime, completionTime in
+                viewModel.generateAndSaveToFile(t, voice, speed: Float(speed), sentenceSplitThreshold: sentenceSplitThreshold) { [weak audioFileManager] fileURL, generationTime, completionTime in
                     guard let fileURL = fileURL else {
                         // Handle error
                         DispatchQueue.main.async {
@@ -747,7 +749,7 @@ struct ContentView: View {
             let endIndex = fullText.index(currentIndex, offsetBy: chunkSize, limitedBy: fullText.endIndex) ?? fullText.endIndex
             let chunk = String(fullText[currentIndex..<endIndex])
 
-            viewModel.addStreamingTextV2(chunk)
+            viewModel.addStreamingTextV2(chunk, sentenceSplitThreshold: sentenceSplitThreshold)
             currentIndex = endIndex
         }
     }

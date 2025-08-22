@@ -91,6 +91,7 @@ final class KokoroTokenizer {
     private var currentLanguage: ESpeakNGEngine.LanguageDialect = .none
     private var isLexiconEnabled = false
     private var phonemeCache: [String: String] = [:]
+    private let phonemeCacheLock = DispatchSemaphore(value: 1)  // Thread safety for cache
 
     // MARK: - Token Structure
 
@@ -530,14 +531,22 @@ final class KokoroTokenizer {
             }
         }
 
-        // Check phoneme cache first
+        // Check phoneme cache first (thread-safe)
+        phonemeCacheLock.wait()
         if let cachedPhoneme = phonemeCache[lowerToken] {
+            phonemeCacheLock.signal()
             return cachedPhoneme
         }
+        phonemeCacheLock.signal()
 
         // Use espeak backend and cache the result
         let phoneme = try eSpeakEngine.phonemize(text: lowerToken)
+
+        // Store in cache (thread-safe)
+        phonemeCacheLock.wait()
         phonemeCache[lowerToken] = phoneme
+        phonemeCacheLock.signal()
+
         return phoneme
     }
 

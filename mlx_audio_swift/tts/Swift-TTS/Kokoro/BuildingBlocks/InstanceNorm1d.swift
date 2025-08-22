@@ -109,12 +109,8 @@ class _InstanceNorm {
     checkInputDim(input)
 
     let featureDim = input.ndim - getNoBatchDim()
-    if input.shape[featureDim] != numFeatures {
-      if affine {
-        fatalError("Expected input's size at dim=\(featureDim) to match numFeatures (\(numFeatures)), but got: \(input.shape[featureDim]).")
-      } else {
-        print("Input's size at dim=\(featureDim) does not match numFeatures. You can silence this warning by not passing in numFeatures, which is not used because affine=False")
-      }
+    if affine && input.shape[featureDim] != numFeatures {
+      fatalError("Expected input's size at dim=\(featureDim) to match numFeatures (\(numFeatures)), but got: \(input.shape[featureDim]).")
     }
 
     if input.ndim == getNoBatchDim() {

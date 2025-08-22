@@ -89,34 +89,34 @@ public class KokoroTTS {
   public typealias AudioChunkCallback = (MLXArray) -> Void
 
   init() {}
-  
+
   // Prewarm the model by initializing it in the background
   public func prewarm(voice: TTSVoice = .afHeart, completion: (() -> Void)? = nil) {
     DispatchQueue.global(qos: .background).async { [weak self] in
       guard let self = self else { return }
-      
+
       do {
         // Initialize the model
         try self.ensureModelInitialized()
-        
+
         // Load the default voice to prewarm voice loading
         autoreleasepool {
           self.voice = VoiceLoader.loadVoice(voice)
           self.voice?.eval()
           self.chosenVoice = voice
         }
-        
+
         // Set language for the tokenizer
         try self.kokoroTokenizer.setLanguage(for: voice)
-        
+
         // Optionally run a tiny test to fully warm up the pipeline
         let testText = "Test"
         let phonemizedResult = try self.kokoroTokenizer.phonemize(testText)
         let inputIds = Tokenizer.tokenize(phonemizedText: phonemizedResult.phonemes)
-        
+
         // Just tokenize, don't generate audio
         _ = inputIds
-        
+
         DispatchQueue.main.async {
           completion?()
         }
@@ -545,20 +545,45 @@ public class KokoroTTS {
     }
   }
 
-  public func generateAudio(voice: TTSVoice, text: String, speed: Float = 1.0, useLegacySentenceSplit: Bool = false, chunkCallback: @escaping AudioChunkCallback) throws {
+    public func generateAudio(voice: TTSVoice, text: String, speed: Float = 1.0, useLegacySentenceSplit: Bool = false, sentenceSplitThreshold: Float, chunkCallback: @escaping AudioChunkCallback) throws {
     try ensureModelInitialized()
 
-    let sentences = useLegacySentenceSplit ? 
-        SentenceTokenizer.splitIntoSentencesLegacy(text: text) : 
-        SentenceTokenizer.splitIntoSentences(text: text)
+    let sentences = useLegacySentenceSplit ?
+        SentenceTokenizer.splitIntoSentencesLegacy(text: text) :
+        SentenceTokenizer.splitIntoSentences(text: text, threshold: sentenceSplitThreshold)
     if sentences.isEmpty {
       throw KokoroTTSError.sentenceSplitError
     }
 
-    // Process each sentence in sequence with better performance
-    DispatchQueue.global(qos: .userInitiated).async {
-      // Don't clear the voice as it may be needded in subsequent calls
+    // Determine processing strategy based on text size and available resources
+    // NOTE: Temporarily disable parallel processing if issues persist
+    let useParallel = sentences.count > 10 && !UserDefaults.standard.bool(forKey: "DisableParallelTTS")
 
+    // Adaptive parallelism based on text size and device capability
+    let maxParallel: Int
+    if !useParallel {
+      maxParallel = 1
+    } else if sentences.count > 100 {
+      // Reduced parallelism to avoid deadlocks
+      maxParallel = 2  // Was 3, now more conservative
+    } else if sentences.count > 50 {
+      maxParallel = 2  // Moderate parallelism
+    } else {
+      maxParallel = 2  // Conservative parallelism for smaller parallel texts
+    }
+
+    if useParallel {
+      print("[TTS] Using parallel processing for \(sentences.count) sentences (max \(maxParallel) concurrent)")
+      generateAudioParallel(voice: voice, sentences: sentences, speed: speed, maxParallel: maxParallel, chunkCallback: chunkCallback)
+    } else {
+      print("[TTS] Using sequential processing for \(sentences.count) sentences")
+      // Use sequential processing for small texts or when parallel is disabled
+      generateAudioSequential(voice: voice, sentences: sentences, speed: speed, chunkCallback: chunkCallback)
+    }
+  }
+
+  private func generateAudioSequential(voice: TTSVoice, sentences: [String], speed: Float, chunkCallback: @escaping AudioChunkCallback) {
+    DispatchQueue.global(qos: .userInitiated).async {
       // Use a separate autorelease pool for each sentence to release memory faster
       for (_, sentence) in sentences.enumerated() {
         autoreleasepool {
@@ -595,11 +620,145 @@ public class KokoroTTS {
     }
   }
 
+  private func generateAudioParallel(voice: TTSVoice, sentences: [String], speed: Float, maxParallel: Int, chunkCallback: @escaping AudioChunkCallback) {
+    DispatchQueue.global(qos: .userInitiated).async {
+      // Store results to maintain order
+      var results: [Int: MLXArray] = [:]
+      let resultsLock = DispatchSemaphore(value: 1)
+      var nextToDeliver = 0
+      let deliveryLock = DispatchSemaphore(value: 1)
+      var failedSentences = Set<Int>()
+
+      // Semaphore to limit concurrent operations
+      let parallelSemaphore = DispatchSemaphore(value: maxParallel)
+
+      // Process sentences with controlled parallelism
+      let group = DispatchGroup()
+
+      print("[TTS] Starting parallel processing of \(sentences.count) sentences")
+
+      for (index, sentence) in sentences.enumerated() {
+        parallelSemaphore.wait()  // Wait for available slot
+        group.enter()
+
+        DispatchQueue.global(qos: .userInitiated).async {
+          defer {
+            parallelSemaphore.signal()  // Release slot
+            group.leave()
+          }
+
+          autoreleasepool {
+            do {
+              // Add timeout for individual sentence generation
+              let startTime = Date()
+
+              // Generate audio for this sentence
+              let audio = try self.generateAudioForSentence(voice: voice, text: sentence, speed: speed)
+              audio.eval()
+
+              let generationTime = Date().timeIntervalSince(startTime)
+              if generationTime > 10.0 {
+                print("[TTS] WARNING: Sentence \(index) took \(generationTime)s to generate")
+              }
+
+              // Store result with minimal retention
+              resultsLock.wait()
+              results[index] = audio
+              let resultsCount = results.count
+              resultsLock.signal()
+
+              // Try to deliver results in order
+              deliveryLock.wait()
+              while nextToDeliver < sentences.count {
+                // Check if this sentence failed
+                if failedSentences.contains(nextToDeliver) {
+                  print("[TTS] Skipping failed sentence \(nextToDeliver)")
+                  nextToDeliver += 1
+
+                  // Generate silent audio for failed chunk to maintain count
+                  let silentAudio = MLXArray.zeros([1])
+                  DispatchQueue.main.async {
+                    chunkCallback(silentAudio)
+                  }
+                  continue
+                }
+
+                resultsLock.wait()
+                if let audioToDeliver = results[nextToDeliver] {
+                  results.removeValue(forKey: nextToDeliver)  // Remove delivered result immediately
+                  resultsLock.signal()
+
+                  let currentIndex = nextToDeliver
+                  nextToDeliver += 1
+
+                  // Send to callback
+                  DispatchQueue.main.async {
+                    chunkCallback(audioToDeliver)
+                  }
+
+                  // More aggressive GPU cache clearing for parallel processing
+                  if currentIndex % 3 == 0 || resultsCount > 5 {
+                    MLX.GPU.clearCache()
+                  }
+                } else {
+                  resultsLock.signal()
+                  break  // Next result not ready yet
+                }
+              }
+              deliveryLock.signal()
+
+            } catch {
+              print("[TTS] ERROR: Failed to process sentence \(index): \(error)")
+              print("[TTS] Sentence text: '\(String(sentence.prefix(50)))...'")
+
+              // Mark as failed
+              resultsLock.wait()
+              failedSentences.insert(index)
+              resultsLock.signal()
+
+              // Try to deliver any pending results
+              deliveryLock.wait()
+              // Check if we need to skip this failed sentence
+              if nextToDeliver == index {
+                nextToDeliver += 1
+                // Generate silent audio for failed chunk
+                let silentAudio = MLXArray.zeros([1])
+                DispatchQueue.main.async {
+                  chunkCallback(silentAudio)
+                }
+              }
+              deliveryLock.signal()
+            }
+          }
+        }
+      }
+
+      // Wait for all to complete with timeout
+      let waitResult = group.wait(timeout: .now() + Double(sentences.count * 5))  // 5 seconds per sentence max
+      if waitResult == .timedOut {
+        print("[TTS] ERROR: Parallel processing timed out!")
+        print("[TTS] Delivered \(nextToDeliver)/\(sentences.count) sentences")
+      } else {
+        print("[TTS] Parallel processing completed successfully")
+      }
+
+      // Final GPU cache clear
+      MLX.GPU.clearCache()
+
+      // Reset model after completing a long text to free memory
+      if sentences.count > 5 {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+          self.resetModel()
+        }
+      }
+    }
+  }
+
   // Public method for streaming - processes a single sentence without re-splitting
   public func generateAudioForSingleSentence(voice: TTSVoice, text: String, speed: Float) throws -> MLXArray {
     return try generateAudioForSentence(voice: voice, text: text, speed: speed)
   }
-  
+
   private func generateAudioForSentence(voice: TTSVoice, text: String, speed: Float) throws -> MLXArray {
     try ensureModelInitialized()
 

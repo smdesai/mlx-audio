@@ -6,6 +6,7 @@
 import AVFoundation
 import MLX
 import SwiftUI
+import Accelerate  // For vDSP optimized vector operations
 #if os(iOS)
 import UIKit
 #endif
@@ -50,7 +51,6 @@ public class KokoroTTSModel: ObservableObject {
     @Published public var isStreaming = false
     private var streamingVoice: TTSVoice?
     private var streamingSpeed: Float = 1.0
-    @Published public var streamingSentenceThreshold: Float = 0.5
 
     private var streamingTextBuffer = ""
     private let streamingBufferLock = DispatchSemaphore(value: 1)
@@ -323,7 +323,7 @@ public class KokoroTTSModel: ObservableObject {
         self.metricsCompletionCallback = callback
     }
 
-    public func say(_ text: String, _ voice: TTSVoice, speed: Float = 1.0) {
+    public func say(_ text: String, _ voice: TTSVoice, speed: Float = 1.0, sentenceSplitTheshold: Float) {
         // Check if app is active
         guard isAppActive else {
             print("App is not active - ignoring TTS request")
@@ -364,13 +364,13 @@ public class KokoroTTSModel: ObservableObject {
                  try? await Task.sleep(nanoseconds: 100_000_000) // 100ms - reduced from 300ms
 
                  // Now start the new generation
-                 self.startSpeechGeneration(text: trimmedText, voice: voice, speed: speed)
+                 self.startSpeechGeneration(text: trimmedText, voice: voice, speed: speed, sentenceSplitThreshold: sentenceSplitTheshold)
              }
              return
          }
 
          // No existing playback, start immediately
-         startSpeechGeneration(text: trimmedText, voice: voice, speed: speed)
+         startSpeechGeneration(text: trimmedText, voice: voice, speed: speed, sentenceSplitThreshold: sentenceSplitTheshold)
     }
 
     public func stopPlayback() {
@@ -468,7 +468,7 @@ public class KokoroTTSModel: ObservableObject {
         let audioData: Data?  // Optional: store in memory for small files
     }
 
-    public func generateAndSaveToFile(_ text: String, _ voice: TTSVoice, speed: Float = 1.0, completion: @escaping (URL?, TimeInterval, TimeInterval) -> Void) {
+    public func generateAndSaveToFile(_ text: String, _ voice: TTSVoice, speed: Float = 1.0, sentenceSplitThreshold: Float, completion: @escaping (URL?, TimeInterval, TimeInterval) -> Void) {
         // Check if app is active
         guard isAppActive else {
             print("App is not active - ignoring TTS request")
@@ -527,10 +527,6 @@ public class KokoroTTSModel: ObservableObject {
         let generationStartTime = Date()
         var totalSampleCount = 0
 
-        // Track chunk order
-        var chunkCounter = 0
-        let chunkCounterLock = DispatchSemaphore(value: 1)
-
         // Track chunk metadata instead of storing data
         var chunkMetadata: [ChunkMetadata] = []
         let metadataLock = DispatchSemaphore(value: 1)
@@ -538,7 +534,7 @@ public class KokoroTTSModel: ObservableObject {
         // First, split text into sentences to know how many chunks to expect
         let sentences = useLegacySentenceSplit ?
             SentenceTokenizer.splitIntoSentencesLegacy(text: trimmedText) :
-            SentenceTokenizer.splitIntoSentences(text: trimmedText)
+            SentenceTokenizer.splitIntoSentences(text: trimmedText, threshold: sentenceSplitThreshold)
 
         guard !sentences.isEmpty else {
             print("[Save] No sentences to process")
@@ -561,8 +557,15 @@ public class KokoroTTSModel: ObservableObject {
         let generationComplete = DispatchSemaphore(value: 0)
         var isTimedOut = false  // Flag to prevent writes after timeout
 
+        // Decide on storage strategy based on file size
+        let useInMemoryStorage = sentences.count <= 30  // Keep small files in memory
+
         // Process everything on a background queue to avoid blocking main thread
         DispatchQueue.global(qos: .userInitiated).async {
+            // Pre-assign chunk numbers to maintain order
+            var assignedChunkNum = 0
+            let assignChunkNumLock = DispatchSemaphore(value: 1)
+
             // Use streaming by sentence approach
             // IMPORTANT: generateAudio processes sentences sequentially and calls the callback
             // in order, but callbacks may execute on different threads
@@ -571,14 +574,16 @@ public class KokoroTTSModel: ObservableObject {
                     voice: voice,
                     text: trimmedText,
                     speed: speed,
-                    useLegacySentenceSplit: self.useLegacySentenceSplit
+                    useLegacySentenceSplit: self.useLegacySentenceSplit,
+                    sentenceSplitThreshold: sentenceSplitThreshold
                 ) { audioBuffer in
 
-                // Assign chunk number immediately to preserve order
-                chunkCounterLock.wait()
-                let currentChunkNum = chunkCounter
-                chunkCounter += 1
-                chunkCounterLock.signal()
+                // Get the pre-assigned chunk number for this callback
+                // Callbacks are called IN ORDER even with parallel processing
+                assignChunkNumLock.wait()
+                let currentChunkNum = assignedChunkNum
+                assignedChunkNum += 1
+                assignChunkNumLock.signal()
 
                 // Update generation time on first chunk
                 if self.audioGenerationTime == 0.0 {
@@ -613,43 +618,61 @@ public class KokoroTTSModel: ObservableObject {
                     if let chunkData = self.convertSamplesToData(audioData) {
                         let chunkSampleCount = audioData.count
 
-                        // Write chunk to individual file immediately
-                        let chunkFileName = String(format: "chunk_%03d.raw", currentChunkNum)
-                        let chunkFileURL = chunkDirectory.appendingPathComponent(chunkFileName)
-
-                        do {
-                            try chunkData.write(to: chunkFileURL)
-
-                            // Track metadata
+                        // Optimize based on storage strategy
+                        if useInMemoryStorage {
+                            // Store in memory for small files (faster)
                             metadataLock.wait()
                             chunkMetadata.append(ChunkMetadata(
                                 chunkNum: currentChunkNum,
                                 sampleCount: chunkSampleCount,
-                                fileName: chunkFileName,
-                                audioData: nil  // Don't store in memory for file-based approach
+                                fileName: "",
+                                audioData: chunkData
                             ))
                             totalSampleCount += chunkSampleCount
                             metadataLock.signal()
+                        } else {
+                            // Write chunk to individual file for large files
+                            let chunkFileName = String(format: "chunk_%03d.raw", currentChunkNum)
+                            let chunkFileURL = chunkDirectory.appendingPathComponent(chunkFileName)
 
-                            // Update chunks received counter thread-safely
-                            chunksReceivedLock.wait()
-                            chunksReceived += 1
-                            let currentChunksReceived = chunksReceived
-                            chunksReceivedLock.signal()
+                            do {
+                                try chunkData.write(to: chunkFileURL)
 
-                            print("[Save] Written chunk #\(currentChunkNum) to file: \(chunkFileName) (\(chunkSampleCount) samples, \(currentChunksReceived)/\(totalExpectedChunks))")
-
-                            // Signal completion when all chunks are received
-                            print("[Save] DEBUG: chunksReceived=\(currentChunksReceived), totalExpectedChunks=\(totalExpectedChunks)")
-                            if currentChunksReceived >= totalExpectedChunks {
-                                print("[Save] All chunks received (\(currentChunksReceived)/\(totalExpectedChunks)), signaling completion")
-                                generationComplete.signal()
-                                print("[Save] Completion signal sent")
-                            } else {
-                                print("[Save] Still waiting for chunks: \(currentChunksReceived)/\(totalExpectedChunks)")
+                                // Track metadata
+                                metadataLock.wait()
+                                chunkMetadata.append(ChunkMetadata(
+                                    chunkNum: currentChunkNum,
+                                    sampleCount: chunkSampleCount,
+                                    fileName: chunkFileName,
+                                    audioData: nil  // Don't store in memory for file-based approach
+                                ))
+                                totalSampleCount += chunkSampleCount
+                                metadataLock.signal()
+                            } catch {
+                                print("[Save] Failed to write chunk #\(currentChunkNum): \(error)")
                             }
-                        } catch {
-                            print("[Save] Failed to write chunk #\(currentChunkNum): \(error)")
+                        }
+
+                        // Update chunks received counter thread-safely
+                        chunksReceivedLock.wait()
+                        chunksReceived += 1
+                        let currentChunksReceived = chunksReceived
+                        chunksReceivedLock.signal()
+
+                        if useInMemoryStorage {
+                            print("[Save] Buffered chunk #\(currentChunkNum) in memory (\(chunkSampleCount) samples, \(currentChunksReceived)/\(totalExpectedChunks))")
+                        } else {
+                            print("[Save] Written chunk #\(currentChunkNum) to file (\(chunkSampleCount) samples, \(currentChunksReceived)/\(totalExpectedChunks))")
+                        }
+
+                        // Signal completion when all chunks are received
+                        print("[Save] DEBUG: chunksReceived=\(currentChunksReceived), totalExpectedChunks=\(totalExpectedChunks)")
+                        if currentChunksReceived >= totalExpectedChunks {
+                            print("[Save] All chunks received (\(currentChunksReceived)/\(totalExpectedChunks)), signaling completion")
+                            generationComplete.signal()
+                            print("[Save] Completion signal sent")
+                        } else {
+                            print("[Save] Still waiting for chunks: \(currentChunksReceived)/\(totalExpectedChunks)")
                         }
                     }
                 }
@@ -718,7 +741,16 @@ public class KokoroTTSModel: ObservableObject {
                 print("[Save] WARNING: Creating partial audio file with \(actualChunksWritten)/\(totalExpectedChunks) chunks")
             }
 
-            print("[Save] Combining \(chunkMetadata.count) chunk files into final WAV...")
+            print("[Save] Combining \(actualChunksWritten) chunk files into final WAV...")
+
+            // Verify chunk directory exists
+            if !FileManager.default.fileExists(atPath: chunkDirectory.path) {
+                print("[Save] ERROR: Chunk directory does not exist at: \(chunkDirectory.path)")
+            } else {
+                print("[Save] Chunk directory exists, checking for files...")
+                let contents = try? FileManager.default.contentsOfDirectory(at: chunkDirectory, includingPropertiesForKeys: nil)
+                print("[Save] Found \(contents?.count ?? 0) files in chunk directory")
+            }
 
             // Combine chunks into final WAV file
             do {
@@ -744,28 +776,40 @@ public class KokoroTTSModel: ObservableObject {
 
                 // Read and write chunks - check if we have in-memory data first
                 var chunksProcessed = 0
+                var totalBytesWritten = 0
                 for metadata in chunkMetadata {
                     autoreleasepool {
                         if let audioData = metadata.audioData {
                             // Use in-memory data if available (faster)
                             fileHandle.write(audioData)
                             chunksProcessed += 1
+                            totalBytesWritten += audioData.count
+                            print("[Save] Wrote in-memory chunk \(metadata.chunkNum): \(audioData.count) bytes")
                         } else if !metadata.fileName.isEmpty {
                             // Fall back to reading from file
                             let chunkFileURL = chunkDirectory.appendingPathComponent(metadata.fileName)
-                            if let chunkData = try? Data(contentsOf: chunkFileURL) {
+                            do {
+                                let chunkData = try Data(contentsOf: chunkFileURL)
                                 fileHandle.write(chunkData)
                                 chunksProcessed += 1
-                            } else {
-                                print("[Save] Warning: Could not read chunk file: \(metadata.fileName)")
+                                totalBytesWritten += chunkData.count
+                                if chunksProcessed <= 3 || chunksProcessed == chunkMetadata.count {
+                                    print("[Save] Wrote file chunk \(metadata.chunkNum) from \(metadata.fileName): \(chunkData.count) bytes")
+                                }
+                            } catch {
+                                print("[Save] ERROR: Could not read chunk file \(metadata.fileName): \(error)")
                             }
+                        } else {
+                            print("[Save] WARNING: Chunk \(metadata.chunkNum) has no data and no filename!")
                         }
 
                         if chunksProcessed % 10 == 0 {
-                            print("[Save] Progress: \(chunksProcessed)/\(chunkMetadata.count) chunks combined")
+                            print("[Save] Progress: \(chunksProcessed)/\(chunkMetadata.count) chunks combined, \(totalBytesWritten) bytes written")
                         }
                     }
                 }
+
+                print("[Save] Total bytes written to file: \(totalBytesWritten)")
 
                 fileHandle.closeFile()
                 print("[Save] All chunks combined successfully")
@@ -851,41 +895,44 @@ public class KokoroTTSModel: ObservableObject {
     }
 
     private func createWAVHeader(sampleCount: Int, sampleRate: Int) -> Data {
-        var data = Data()
+        // Pre-allocate exact size (44 bytes for standard WAV header)
+        var data = Data(capacity: 44)
 
         let dataSize = sampleCount * 2 // 16-bit samples
         let fileSize = dataSize + 36
 
-        // RIFF chunk
-        data.append("RIFF".data(using: .ascii)!)
-        data.append(withUnsafeBytes(of: Int32(fileSize).littleEndian) { Data($0) })
-        data.append("WAVE".data(using: .ascii)!)
+        // Build header more efficiently
+        data.append(contentsOf: [0x52, 0x49, 0x46, 0x46]) // "RIFF"
+        withUnsafeBytes(of: Int32(fileSize).littleEndian) { data.append(contentsOf: $0) }
+        data.append(contentsOf: [0x57, 0x41, 0x56, 0x45]) // "WAVE"
 
-        // fmt chunk
-        data.append("fmt ".data(using: .ascii)!)
-        data.append(withUnsafeBytes(of: Int32(16).littleEndian) { Data($0) })
-        data.append(withUnsafeBytes(of: Int16(1).littleEndian) { Data($0) }) // PCM
-        data.append(withUnsafeBytes(of: Int16(1).littleEndian) { Data($0) }) // Mono
-        data.append(withUnsafeBytes(of: Int32(sampleRate).littleEndian) { Data($0) })
-        data.append(withUnsafeBytes(of: Int32(sampleRate * 2).littleEndian) { Data($0) }) // Byte rate
-        data.append(withUnsafeBytes(of: Int16(2).littleEndian) { Data($0) }) // Block align
-        data.append(withUnsafeBytes(of: Int16(16).littleEndian) { Data($0) }) // Bits per sample
+        data.append(contentsOf: [0x66, 0x6D, 0x74, 0x20]) // "fmt "
+        withUnsafeBytes(of: Int32(16).littleEndian) { data.append(contentsOf: $0) }
+        withUnsafeBytes(of: Int16(1).littleEndian) { data.append(contentsOf: $0) } // PCM
+        withUnsafeBytes(of: Int16(1).littleEndian) { data.append(contentsOf: $0) } // Mono
+        withUnsafeBytes(of: Int32(sampleRate).littleEndian) { data.append(contentsOf: $0) }
+        withUnsafeBytes(of: Int32(sampleRate * 2).littleEndian) { data.append(contentsOf: $0) } // Byte rate
+        withUnsafeBytes(of: Int16(2).littleEndian) { data.append(contentsOf: $0) } // Block align
+        withUnsafeBytes(of: Int16(16).littleEndian) { data.append(contentsOf: $0) } // Bits per sample
 
-        // data chunk
-        data.append("data".data(using: .ascii)!)
-        data.append(withUnsafeBytes(of: Int32(dataSize).littleEndian) { Data($0) })
+        data.append(contentsOf: [0x64, 0x61, 0x74, 0x61]) // "data"
+        withUnsafeBytes(of: Int32(dataSize).littleEndian) { data.append(contentsOf: $0) }
 
         return data
     }
 
     private func convertSamplesToData(_ samples: [Float]) -> Data? {
-        var data = Data()
+        // Pre-allocate exact size needed (2 bytes per sample)
+        let byteCount = samples.count * 2
+        var data = Data(count: byteCount)  // Use count, not capacity!
 
-        // Convert float samples to 16-bit PCM
-        for sample in samples {
-            let clampedSample = max(-1.0, min(1.0, sample))
-            let int16Sample = Int16(clampedSample * Float(Int16.max))
-            data.append(withUnsafeBytes(of: int16Sample.littleEndian) { Data($0) })
+        // Use unsafe buffer for batch conversion (much faster)
+        data.withUnsafeMutableBytes { rawBuffer in
+            let int16Buffer = rawBuffer.bindMemory(to: Int16.self)
+            for (index, sample) in samples.enumerated() {
+                let clampedSample = max(-1.0, min(1.0, sample))
+                int16Buffer.baseAddress!.advanced(by: index).pointee = Int16(clampedSample * Float(Int16.max)).littleEndian
+            }
         }
 
         return data
@@ -893,7 +940,7 @@ public class KokoroTTSModel: ObservableObject {
 
     // MARK: - Audio Generation and Playback
 
-    private func startSpeechGeneration(text: String, voice: TTSVoice, speed: Float) {
+    private func startSpeechGeneration(text: String, voice: TTSVoice, speed: Float, sentenceSplitThreshold: Float) {
         // Update internal state
         isGenerating = true
 
@@ -915,7 +962,8 @@ public class KokoroTTSModel: ObservableObject {
                 voice: voice,
                 text: text,
                 speed: speed,
-                useLegacySentenceSplit: useLegacySentenceSplit
+                useLegacySentenceSplit: useLegacySentenceSplit,
+                sentenceSplitThreshold: sentenceSplitThreshold
             ) { [weak self] audioBuffer in
                 guard let self = self else { return }
 
@@ -1215,23 +1263,23 @@ public class KokoroTTSModel: ObservableObject {
         // Set frame length
         buffer.frameLength = buffer.frameCapacity
 
-        // Copy data
+        // Use unsafe buffer pointer for faster memory copy
         let channels = buffer.floatChannelData!
-        let chunkSize = 32768 // 32K samples at a time
+        let destPointer = channels[0]
+        let volumeBoost: Float = 1.25
 
-        for startIdx in stride(from: 0, to: min(frameCount, audioData.count), by: chunkSize) {
-            autoreleasepool {
-                let endIdx = min(startIdx + chunkSize, min(frameCount, audioData.count))
+        // Use vDSP for vectorized operations (much faster for large arrays)
+        audioData.withUnsafeBufferPointer { sourceBuffer in
+            // Apply volume boost and clipping in a single vectorized operation
+            var scale = volumeBoost
+            vDSP_vsmul(sourceBuffer.baseAddress!, 1, &scale, destPointer, 1, vDSP_Length(frameCount))
 
-                // Copy with volume boost
-                for i in startIdx..<endIdx {
-                    if i < audioData.count && i < Int(buffer.frameCapacity) {
-                        // Apply volume boost (25%) with clipping prevention
-                        channels[0][i] = min(max(audioData[i] * 1.25, -0.98), 0.98)
-                    }
-                }
-            }
+            // Clip to [-0.98, 0.98] using vDSP
+            var lower: Float = -0.98
+            var upper: Float = 0.98
+            vDSP_vclip(destPointer, 1, &lower, &upper, destPointer, 1, vDSP_Length(frameCount))
         }
+
         return buffer
     }
 
@@ -1651,7 +1699,7 @@ public class KokoroTTSModel: ObservableObject {
     }
 
     /// Add text chunks and process complete sentences
-    public func addStreamingTextV2(_ text: String) {
+    public func addStreamingTextV2(_ text: String, sentenceSplitThreshold: Float) {
         guard isStreaming else {
             print("No active streaming session")
             return
@@ -1663,11 +1711,11 @@ public class KokoroTTSModel: ObservableObject {
         streamingBufferLock.signal()
 
         // Try to extract complete sentences
-        processBufferedText()
+        processBufferedText(sentenceSplitThreshold: sentenceSplitThreshold)
     }
 
     /// Process buffered text to extract complete sentences
-    private func processBufferedText() {
+    private func processBufferedText(sentenceSplitThreshold: Float) {
         // Get a copy of the buffer and the sentences to process
         var sentencesToProcess: [String] = []
 
@@ -1698,7 +1746,7 @@ public class KokoroTTSModel: ObservableObject {
         // Use SentenceTokenizer to split the buffer
         let sentences = useLegacySentenceSplit ?
             SentenceTokenizer.splitIntoSentencesLegacy(text: currentBuffer) :
-            SentenceTokenizer.splitIntoSentences(text: currentBuffer, threshold: streamingSentenceThreshold)
+            SentenceTokenizer.splitIntoSentences(text: currentBuffer, threshold: sentenceSplitThreshold)
 
         // If we have no sentences, wait for more text
         if sentences.isEmpty {
