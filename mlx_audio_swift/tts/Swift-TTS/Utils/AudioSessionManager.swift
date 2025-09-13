@@ -24,8 +24,10 @@ public class AudioSessionManager {
     public func setupAudioSession() {
         #if os(iOS)
         do {
-            try AVAudioSession.sharedInstance().setCategory(.playback, options: [.duckOthers])
-            try AVAudioSession.sharedInstance().setActive(true)
+            let session = AVAudioSession.sharedInstance()
+            // Use spokenAudio mode for TTS; avoid unsupported options with .playback
+            try session.setCategory(.playback, mode: .spokenAudio, options: [.duckOthers])
+            try session.setActive(true, options: .notifyOthersOnDeactivation)
         } catch {
             print("Audio session setup failed: \(error)")
         }
@@ -37,9 +39,11 @@ public class AudioSessionManager {
     public func resetAudioSession() {
         #if os(iOS)
         do {
-            try AVAudioSession.sharedInstance().setActive(false)
-            try AVAudioSession.sharedInstance().setActive(true)
-            try AVAudioSession.sharedInstance().setCategory(.playback, options: [.duckOthers])
+            let session = AVAudioSession.sharedInstance()
+            try session.setActive(false, options: .notifyOthersOnDeactivation)
+            // Reapply category before reactivating
+            try session.setCategory(.playback, mode: .spokenAudio, options: [.duckOthers])
+            try session.setActive(true, options: .notifyOthersOnDeactivation)
         } catch {
             print("Failed to reset audio session: \(error)")
         }
@@ -47,17 +51,7 @@ public class AudioSessionManager {
         // No equivalent action needed for macOS
     }
 
-    /// Register for memory warnings
-    public func registerForMemoryWarnings(target: Any, selector: Selector) {
-        #if os(iOS)
-        NotificationCenter.default.addObserver(
-            target,
-            selector: selector,
-            name: UIApplication.didReceiveMemoryWarningNotification,
-            object: nil
-        )
-        #endif
-    }
+    // Removed: registerForMemoryWarnings (unused)
 
     /// Deactivate the audio session
     public func deactivateAudioSession() {

@@ -19,6 +19,7 @@ struct AudioFileInfo: Codable, Identifiable {
     let speed: Float
     let generationTime: TimeInterval
     let completionTime: TimeInterval
+    var transcript: String?
 
     var formattedFileSize: String {
         let formatter = ByteCountFormatter()
@@ -44,11 +45,12 @@ struct AudioFileInfo: Codable, Identifiable {
 }
 
 class AudioFileManager: ObservableObject {
+    static let shared = AudioFileManager()
     @Published var audioFiles: [AudioFileInfo] = []
     private let documentsDirectory: URL
     private let metadataFile = "audio_metadata.json"
 
-    init() {
+    private init() {
         documentsDirectory = FileManager.default.urls(for: .documentDirectory,
                                                      in: .userDomainMask).first!
         loadMetadata()
@@ -76,9 +78,14 @@ class AudioFileManager: ObservableObject {
         let attributes = try FileManager.default.attributesOfItem(atPath: fileURL.path)
         let fileSize = attributes[.size] as? Int64 ?? 0
 
-        // Get audio duration
-        let asset = AVURLAsset(url: fileURL)
-        let duration = CMTimeGetSeconds(asset.duration)
+        // Get audio duration (avoid deprecated AVAsset.duration by using AVAudioPlayer)
+        let duration: TimeInterval
+        do {
+            let player = try AVAudioPlayer(contentsOf: fileURL)
+            duration = player.duration
+        } catch {
+            duration = 0
+        }
 
         // Create file info
         let fileInfo = AudioFileInfo(
@@ -142,6 +149,13 @@ class AudioFileManager: ObservableObject {
             try data.write(to: metadataURL)
         } catch {
             print("Failed to save metadata: \(error)")
+        }
+    }
+
+    func updateTranscript(for id: UUID, transcript: String?) {
+        if let idx = audioFiles.firstIndex(where: { $0.id == id }) {
+            audioFiles[idx].transcript = transcript
+            saveMetadata()
         }
     }
 }

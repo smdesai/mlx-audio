@@ -9,28 +9,33 @@ import SwiftUI
 import AVFoundation
 
 // Audio player manager class to handle delegate
-class AudioPlayerManager: NSObject, ObservableObject, AVAudioPlayerDelegate {
-    @Published var playingFileId: UUID?
-    private var audioPlayer: AVAudioPlayer?
+    class AudioPlayerManager: NSObject, ObservableObject, AVAudioPlayerDelegate {
+        @Published var playingFileId: UUID?
+        private var audioPlayer: AVAudioPlayer?
 
-    func playFile(_ file: AudioFileInfo, fileURL: URL) {
-        stopPlayback()
+        func playFile(_ file: AudioFileInfo, fileURL: URL) {
+            stopPlayback()
 
-        do {
-            audioPlayer = try AVAudioPlayer(contentsOf: fileURL)
-            audioPlayer?.delegate = self
-            audioPlayer?.play()
-            playingFileId = file.id
-        } catch {
-            print("Failed to play audio file: \(error)")
+            do {
+                audioPlayer = try AVAudioPlayer(contentsOf: fileURL)
+                audioPlayer?.delegate = self
+                audioPlayer?.play()
+                playingFileId = file.id
+
+                // Configure Now Playing for island/lock screen
+                NowPlayingManager.shared.configure(title: file.displayName, artist: "Saved Audio", duration: file.duration)
+                NowPlayingManager.shared.startProgress()
+            } catch {
+                print("Failed to play audio file: \(error)")
+            }
         }
-    }
 
-    func stopPlayback() {
-        audioPlayer?.stop()
-        audioPlayer = nil
-        playingFileId = nil
-    }
+        func stopPlayback() {
+            audioPlayer?.stop()
+            audioPlayer = nil
+            playingFileId = nil
+            NowPlayingManager.shared.stop()
+        }
 
     // AVAudioPlayerDelegate
     func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
@@ -39,7 +44,7 @@ class AudioPlayerManager: NSObject, ObservableObject, AVAudioPlayerDelegate {
 }
 
 struct FileManagementView: View {
-    @StateObject private var fileManager = AudioFileManager()
+    @StateObject private var fileManager = AudioFileManager.shared
     @StateObject private var playerManager = AudioPlayerManager()
     @State private var showDeleteAlert = false
     @State private var fileToDelete: AudioFileInfo?
@@ -160,12 +165,35 @@ struct FileManagementView: View {
 
                 HStack(spacing: 16) {
                     detailItem(icon: "person.wave.2", label: "Voice", value: formatVoiceName(file.voiceUsed))
-                    detailItem(icon: "speedometer", label: "Speed", value: String(format: "%.1fx", file.speed))
+                    let rtf = file.generationTime > 0 ? (file.duration / file.generationTime) : 0
+                    let rtfStr = rtf > 0 ? String(format: "%.2fx", rtf) : "-"
+                    detailItem(icon: "bolt.badge.clock", label: "RTF", value: rtfStr)
                 }
 
                 HStack(spacing: 16) {
                     detailItem(icon: "timer", label: "Generation", value: String(format: "%.2fs", file.generationTime))
                     detailItem(icon: "checkmark.circle", label: "Completion", value: String(format: "%.2fs", file.completionTime))
+                }
+
+                
+            }
+
+            // Transcript
+            if let transcript = file.transcript, !transcript.isEmpty {
+                Divider()
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "text.quote")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Text("Transcript")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Text(transcript)
+                        .font(.footnote)
+                        .lineLimit(3)
+                        .foregroundStyle(.primary)
                 }
             }
 

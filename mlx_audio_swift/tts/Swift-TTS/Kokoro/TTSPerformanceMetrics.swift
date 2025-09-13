@@ -18,6 +18,9 @@ public struct TTSPerformanceMetrics {
     
     /// Total time from start to all audio playback complete (seconds)
     public var totalCompletionTime: TimeInterval = 0
+
+    /// Total audio duration generated (seconds)
+    public var audioDurationSeconds: TimeInterval = 0
     
     // MARK: - Timestamps
     
@@ -53,11 +56,11 @@ public struct TTSPerformanceMetrics {
         return Double(charactersProcessed) / totalGenerationTime
     }
     
-    /// Real-time factor (generation time vs playback time)
+    /// Real-time factor (audio duration divided by generation time).
+    /// Values > 1.0 indicate faster-than-real-time generation.
     public var realTimeFactor: Double {
-        guard totalGenerationTime > 0 && totalCompletionTime > totalGenerationTime else { return 0 }
-        let playbackDuration = totalCompletionTime - totalGenerationTime
-        return totalGenerationTime / playbackDuration
+        guard totalGenerationTime > 0 && audioDurationSeconds > 0 else { return 0 }
+        return audioDurationSeconds / totalGenerationTime
     }
     
     // MARK: - Methods
@@ -67,6 +70,7 @@ public struct TTSPerformanceMetrics {
         timeToFirstAudio = 0
         totalGenerationTime = 0
         totalCompletionTime = 0
+        audioDurationSeconds = 0
         generationStartTime = nil
         allAudioGeneratedTime = nil
         playbackCompletionTime = nil
@@ -111,6 +115,11 @@ public struct TTSPerformanceMetrics {
     public mutating func addAudioChunk() {
         audioChunksGenerated += 1
     }
+
+    /// Add to total audio duration (in seconds)
+    public mutating func addAudioDuration(_ seconds: TimeInterval) {
+        audioDurationSeconds += seconds
+    }
     
     // MARK: - Description
     
@@ -142,7 +151,7 @@ public struct TTSPerformanceMetrics {
         }
         
         if realTimeFactor > 0 {
-            lines.append(String(format: "Real-time factor: %.2fx", realTimeFactor))
+            lines.append(String(format: "Real-time factor (dur/gen): %.2fx", realTimeFactor))
         }
         
         return lines.joined(separator: "\n")
@@ -152,45 +161,4 @@ public struct TTSPerformanceMetrics {
 // MARK: - ObservableObject Wrapper
 
 /// Observable wrapper for use in SwiftUI
-public class TTSPerformanceMetricsObservable: ObservableObject {
-    @Published public var metrics = TTSPerformanceMetrics()
-    
-    public init() {}
-    
-    /// Forward all mutations through the observable wrapper
-    
-    public func reset() {
-        metrics.reset()
-        objectWillChange.send()
-    }
-    
-    public func startGeneration() {
-        metrics.startGeneration()
-        objectWillChange.send()
-    }
-    
-    public func recordFirstAudio() {
-        metrics.recordFirstAudio()
-        objectWillChange.send()
-    }
-    
-    public func recordGenerationProgress() {
-        metrics.recordGenerationProgress()
-        objectWillChange.send()
-    }
-    
-    public func recordPlaybackCompletion() {
-        metrics.recordPlaybackCompletion()
-        objectWillChange.send()
-    }
-    
-    public func addProcessedText(_ text: String) {
-        metrics.addProcessedText(text)
-        objectWillChange.send()
-    }
-    
-    public func addAudioChunk() {
-        metrics.addAudioChunk()
-        objectWillChange.send()
-    }
-}
+// (Removed) Observable wrapper was unused; metrics are consumed directly from the model

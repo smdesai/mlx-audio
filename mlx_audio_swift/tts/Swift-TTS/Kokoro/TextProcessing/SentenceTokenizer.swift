@@ -8,24 +8,17 @@ import NaturalLanguage
 
 public final class SentenceTokenizer {
 
-    // Lazy initialization to avoid startup delay
-    private static var _segmenter: SentenceSegmentKit?
-    private static let segmenterQueue = DispatchQueue(label: "com.sentencetokenizer.init", attributes: .concurrent)
-    
-    private static var segmenter: SentenceSegmentKit {
-        return segmenterQueue.sync(flags: .barrier) {
-            if let existing = _segmenter {
-                return existing
-            }
-            do {
-                let segmenter = try SentenceSegmentKit()
-                _segmenter = segmenter
-                return segmenter
-            } catch {
-                fatalError("Failed to initialize SentenceSegmentKit: \(error)")
-            }
+    // Debug flag for logging
+    private static let debugLogging = false
+
+    // One-time initialization to avoid contention on hot path
+    private static let segmenter: SentenceSegmentKit = {
+        do {
+            return try SentenceSegmentKit()
+        } catch {
+            fatalError("Failed to initialize SentenceSegmentKit: \(error)")
         }
-    }
+    }()
     
     private init() {}
     
@@ -40,14 +33,15 @@ public final class SentenceTokenizer {
 
     // MARK: - Initial Split
 
-    public static func splitIntoSentences(text: String, threshold: Float? = nil) -> [String] {
+    public static func splitIntoSentences(text: String, threshold: Float? = nil, optimizeChunks: Bool = true) -> [String] {
         guard !text.isEmpty else { return [] }
 
         let detectedLanguage = detectLanguage(text: text)
         let initialSentences = performInitialSplit(text: text, language: detectedLanguage, threshold: threshold)
         let refinedSentences = applyTTSRefinements(sentences: initialSentences, originalText: text)
         
-        return refinedSentences
+        // Apply optimization when requested (default true)
+        return optimizeChunks ? optimizeTTSChunks(sentences: refinedSentences, language: detectedLanguage) : refinedSentences
     }
     
     public static func splitIntoSentencesLegacy(text: String) -> [String] {
@@ -61,10 +55,14 @@ public final class SentenceTokenizer {
     }
 
     private static func performInitialSplit(text: String, language: NLLanguage?, threshold: Float? = nil) -> [String] {
-        let sentences = Self.segmenter.splitSentences(text, threshold: threshold)
-        print("Sentences (threshold: \(threshold ?? 0.5)):")
-        for (i, sentence) in sentences.enumerated() {
-            print("  \(i + 1): \(sentence)")
+        // Clamp threshold to a reasonable range
+        let th = min(max(threshold ?? 0.5, 0.1), 1.0)
+        let sentences = Self.segmenter.splitSentences(text, threshold: th)
+        if debugLogging {
+            print("[SentenceTokenizer] Sentences (threshold: \(th)):")
+            for (i, sentence) in sentences.enumerated() {
+                print("  \(i + 1): \(sentence)")
+            }
         }
         return sentences.isEmpty ? [text] : sentences
         
@@ -85,9 +83,11 @@ public final class SentenceTokenizer {
             return true
         }
         
-        print("Sentences (legacy):")
-        for (i, sentence) in sentences.enumerated() {
-            print("  \(i + 1): \(sentence)")
+        if debugLogging {
+            print("[SentenceTokenizer] Sentences (legacy):")
+            for (i, sentence) in sentences.enumerated() {
+                print("  \(i + 1): \(sentence)")
+            }
         }
         
         return sentences.isEmpty ? [text] : sentences
@@ -213,12 +213,11 @@ public final class SentenceTokenizer {
 
     // MARK: - Helper Methods
 
-    private static let languageRecognizer = NLLanguageRecognizer()
-
     private static func detectLanguage(text: String) -> NLLanguage? {
-        languageRecognizer.reset()
-        languageRecognizer.processString(text)
-        return languageRecognizer.dominantLanguage
+        // Use a fresh recognizer per call to avoid shared mutable state
+        let recognizer = NLLanguageRecognizer()
+        recognizer.processString(text)
+        return recognizer.dominantLanguage
     }
 
     private enum ScriptType {
@@ -242,8 +241,10 @@ public final class SentenceTokenizer {
     }
 
     private static func hasSentenceEnding(_ text: String, endings: Set<Character>) -> Bool {
-        guard let lastChar = text.last else { return false }
-        return endings.contains(lastChar) && !text.hasSuffix(" ")
+        // Inspect the last non-whitespace character
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let lastChar = trimmed.last else { return false }
+        return endings.contains(lastChar)
     }
 
     private static func hasStrongSentenceEnding(_ text: String) -> Bool {

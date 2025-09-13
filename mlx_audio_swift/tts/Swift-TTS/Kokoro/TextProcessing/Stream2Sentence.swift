@@ -43,8 +43,6 @@ public class Stream2Sentence {
     private var configuration: Configuration
     private var buffer: String = ""
     private var firstSentence: Bool = true
-    private var lastDelimiterIndices: [Int] = []
-    private var wordCount: Int = 0
     private let queue = DispatchQueue(label: "com.stream2sentence.processing", qos: .userInitiated)
     private let bufferLock = NSLock()
     
@@ -92,8 +90,6 @@ public class Stream2Sentence {
             
             // Reset state
             self.firstSentence = true
-            self.lastDelimiterIndices.removeAll()
-            self.wordCount = 0
         }
     }
     
@@ -115,35 +111,36 @@ public class Stream2Sentence {
         }
     }
     
-    private func findDelimiterPositions(in text: String) -> [(index: Int, delimiter: Character, isFull: Bool)] {
-        var positions: [(index: Int, delimiter: Character, isFull: Bool)] = []
-        
-        for (index, char) in text.enumerated() {
-            if configuration.sentenceFragmentDelimiters.contains(char) {
-                let isFull = configuration.fullSentenceDelimiters.contains(char)
-                positions.append((index: index, delimiter: char, isFull: isFull))
+    private func findDelimiterPositions(in text: String) -> [(idx: String.Index, delimiter: Character, isFull: Bool)] {
+        var positions: [(idx: String.Index, delimiter: Character, isFull: Bool)] = []
+        var i = text.startIndex
+        while i < text.endIndex {
+            let ch = text[i]
+            if configuration.sentenceFragmentDelimiters.contains(ch) {
+                let isFull = configuration.fullSentenceDelimiters.contains(ch)
+                positions.append((idx: i, delimiter: ch, isFull: isFull))
             }
+            i = text.index(after: i)
         }
-        
         return positions
     }
     
-    private func processStandardYield(delimiterPositions: [(index: Int, delimiter: Character, isFull: Bool)], 
+    private func processStandardYield(delimiterPositions: [(idx: String.Index, delimiter: Character, isFull: Bool)], 
                                      sentenceCallback: @escaping SentenceCallback) {
         bufferLock.lock()
         defer { bufferLock.unlock() }
         
         var sentencesToYield: [String] = []
-        var lastProcessedIndex = 0
+        var lastProcessedIndex: String.Index? = nil
         
         for position in delimiterPositions {
             // Only process full sentence delimiters for standard yield
             guard position.isFull else { continue }
             
             // Check context to determine if this is a real sentence boundary
-            if isValidSentenceBoundary(at: position.index, in: buffer) {
-                let sentenceEndIndex = buffer.index(buffer.startIndex, offsetBy: position.index + 1)
-                let sentence = String(buffer[buffer.startIndex..<sentenceEndIndex])
+            if isValidSentenceBoundary(at: position.idx, in: buffer) {
+                let endAfterDelim = buffer.index(after: position.idx)
+                let sentence = String(buffer[buffer.startIndex..<endAfterDelim])
                 
                 // Check minimum length requirements
                 let trimmedSentence = sentence.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -151,18 +148,19 @@ public class Stream2Sentence {
                 
                 if trimmedSentence.count >= minLength {
                     sentencesToYield.append(trimmedSentence)
-                    lastProcessedIndex = position.index + 1
+                    lastProcessedIndex = endAfterDelim
                 }
             }
         }
         
         // Update buffer and state
-        if lastProcessedIndex > 0 && lastProcessedIndex < buffer.count {
-            let startIndex = buffer.index(buffer.startIndex, offsetBy: lastProcessedIndex)
-            // Don't trim leading whitespace - it might be important
-            buffer = String(buffer[startIndex...])
-        } else if lastProcessedIndex >= buffer.count {
-            buffer = ""
+        if let lastIdx = lastProcessedIndex {
+            if lastIdx < buffer.endIndex {
+                // Don't trim leading whitespace - it might be important
+                buffer = String(buffer[lastIdx...])
+            } else {
+                buffer = ""
+            }
         }
         
         // Yield sentences
@@ -179,16 +177,16 @@ public class Stream2Sentence {
         }
     }
     
-    private func processQuickYieldEveryFragment(delimiterPositions: [(index: Int, delimiter: Character, isFull: Bool)], 
+    private func processQuickYieldEveryFragment(delimiterPositions: [(idx: String.Index, delimiter: Character, isFull: Bool)], 
                                                sentenceCallback: @escaping SentenceCallback) {
         bufferLock.lock()
         defer { bufferLock.unlock() }
         
-        var lastProcessedIndex = 0
+        var lastProcessedIndex: String.Index? = nil
         
         for position in delimiterPositions {
-            let sentenceEndIndex = buffer.index(buffer.startIndex, offsetBy: position.index + 1)
-            let fragment = String(buffer[buffer.startIndex..<sentenceEndIndex])
+            let endAfterDelim = buffer.index(after: position.idx)
+            let fragment = String(buffer[buffer.startIndex..<endAfterDelim])
             
             let trimmedFragment = fragment.trimmingCharacters(in: .whitespacesAndNewlines)
             if !trimmedFragment.isEmpty {
@@ -199,71 +197,60 @@ public class Stream2Sentence {
                 }
             }
             
-            lastProcessedIndex = position.index + 1
+            lastProcessedIndex = endAfterDelim
         }
         
         // Update buffer
-        if lastProcessedIndex > 0 && lastProcessedIndex < buffer.count {
-            let startIndex = buffer.index(buffer.startIndex, offsetBy: lastProcessedIndex)
-            // Don't trim whitespace - it might be important
-            buffer = String(buffer[startIndex...])
-        } else if lastProcessedIndex >= buffer.count {
-            buffer = ""
+        if let lastIdx = lastProcessedIndex {
+            if lastIdx < buffer.endIndex {
+                // Don't trim whitespace - it might be important
+                buffer = String(buffer[lastIdx...])
+            } else {
+                buffer = ""
+            }
         }
     }
     
-    private func isValidSentenceBoundary(at index: Int, in text: String) -> Bool {
-        // Get the delimiter position
-        let delimiterIndex = text.index(text.startIndex, offsetBy: index)
+    private func isValidSentenceBoundary(at delimiterIndex: String.Index, in text: String) -> Bool {
         let delimiter = text[delimiterIndex]
-        
-        // Only process clear sentence endings for now
-        guard ".!?".contains(delimiter) else { return false }
-        
-        // Need at least 2 more characters after delimiter to check
-        guard index < text.count - 2 else { return false }
-        
-        // Get context before the delimiter
-        let beforeStart = max(0, index - 10)
-        let beforeStartIndex = text.index(text.startIndex, offsetBy: beforeStart)
-        let beforeContext = String(text[beforeStartIndex..<delimiterIndex])
-        
-        // Check for common abbreviations that shouldn't end sentences
-        let abbreviations = ["Mr", "Mrs", "Ms", "Dr", "St", "Ave", "Inc", "Ltd", "Jr", "Sr", 
-                           "Co", "Corp", "Ph.D", "M.D", "B.A", "M.A", "D.D.S", "Ph", 
-                           "U.S", "U.K", "E.U", "A.M", "P.M", "i.e", "e.g", "vs", "etc"]
-        
+
+        // Accept configured delimiters including CJK and newlines
+        guard configuration.fullSentenceDelimiters.contains(delimiter) || "。！？…".contains(delimiter) else {
+            return false
+        }
+
+        // Abbreviation guard (ASCII contexts)
+        let contextWindow = 12
+        let beforeStart = text.index(delimiterIndex, offsetBy: -min(contextWindow, text.distance(from: text.startIndex, to: delimiterIndex)), limitedBy: text.startIndex) ?? text.startIndex
+        let beforeContext = String(text[beforeStart..<delimiterIndex])
+        let abbreviations = [
+            "Mr", "Mrs", "Ms", "Dr", "St", "Ave", "Inc", "Ltd", "Jr", "Sr",
+            "Co", "Corp", "Ph.D", "M.D", "B.A", "M.A", "D.D.S", "U.S", "U.K", "E.U",
+            "A.M", "P.M", "i.e", "e.g", "vs", "etc"
+        ]
         for abbr in abbreviations {
-            if beforeContext.hasSuffix(abbr) {
-                log("Skipping boundary after abbreviation: \(abbr)", level: .debug)
-                return false
+            if beforeContext.hasSuffix(abbr) { return false }
+        }
+
+        // After the delimiter: allow spaces and closing quotes/brackets
+        var checkIndex = text.index(after: delimiterIndex)
+        while checkIndex < text.endIndex {
+            let ch = text[checkIndex]
+            if ch == " " || ch == "\n" || ch == "\t" || ")]}»”’』」》】）".contains(ch) {
+                checkIndex = text.index(after: checkIndex)
+                continue
             }
+            break
         }
-        
-        // Check what follows the delimiter
-        let nextIndex = text.index(after: delimiterIndex)
-        guard nextIndex < text.endIndex else { return false }
-        
-        // Must be followed by space
-        guard text[nextIndex] == " " else { return false }
-        
-        // Skip any additional spaces
-        var checkIndex = text.index(after: nextIndex)
-        while checkIndex < text.endIndex && text[checkIndex] == " " {
-            checkIndex = text.index(after: checkIndex)
-        }
-        
-        // If we've reached the end, not a complete sentence yet
-        guard checkIndex < text.endIndex else { return false }
-        
-        // Strong indicator: uppercase letter after space
-        if text[checkIndex].isUppercase {
-            return true
-        }
-        
-        // Weak boundary - only return true if we have substantial text after
-        let remainingText = String(text[checkIndex...])
-        return remainingText.count > 20  // Need more context to be sure
+
+        // If at end of text, treat as complete sentence
+        if checkIndex >= text.endIndex { return true }
+
+        // For CJK, no need to require space/uppercase; accept punctuation end
+        if "。！？…".contains(delimiter) { return true }
+
+        // For Latin, accept boundary even if next is lowercase (e.g., quotes, proper nouns, etc.)
+        return true
     }
     
     private func cleanupText(_ text: String) -> String {
@@ -322,16 +309,4 @@ public class Stream2Sentence {
 
 // MARK: - Convenience Extensions
 
-extension Stream2Sentence {
-    /// Process a text stream with default configuration
-    public static func processStream(textStream: AsyncStream<String>, 
-                                   sentenceCallback: @escaping SentenceCallback) async {
-        let processor = Stream2Sentence()
-        
-        for await text in textStream {
-            processor.addText(text, sentenceCallback: sentenceCallback)
-        }
-        
-        processor.flush(sentenceCallback: sentenceCallback)
-    }
-}
+// Removed: Unused AsyncStream convenience wrapper

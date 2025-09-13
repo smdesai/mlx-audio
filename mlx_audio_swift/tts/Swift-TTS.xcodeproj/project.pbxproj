@@ -19,6 +19,10 @@
 		7BBF581B2DDD074E0047DCFF /* MLXNN in Frameworks */ = {isa = PBXBuildFile; productRef = 7BBF581A2DDD074E0047DCFF /* MLXNN */; };
 		7BBF581D2DDD07610047DCFF /* MLXFFT in Frameworks */ = {isa = PBXBuildFile; productRef = 7BBF581C2DDD07610047DCFF /* MLXFFT */; };
 		7BBF581F2DDD07680047DCFF /* MLXFast in Frameworks */ = {isa = PBXBuildFile; productRef = 7BBF581E2DDD07680047DCFF /* MLXFast */; };
+		7BEB0AB12E5BB63F00A377C7 /* WidgetKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 7BEB0AB02E5BB63F00A377C7 /* WidgetKit.framework */; };
+		7BEB0AB32E5BB63F00A377C7 /* SwiftUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 7BEB0AB22E5BB63F00A377C7 /* SwiftUI.framework */; };
+		7BEB0AC42E5BB64000A377C7 /* Swift-TTS-WidgetsExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 7BEB0AAF2E5BB63F00A377C7 /* Swift-TTS-WidgetsExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		7BEB0ACB2E5BBA9200A377C7 /* TranscriptionLiveActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7BEB0ACA2E5BBA9100A377C7 /* TranscriptionLiveActivity.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -28,6 +32,13 @@
 			proxyType = 1;
 			remoteGlobalIDString = 26942CF52DABD3B400B82507;
 			remoteInfo = "Swift-TTS";
+		};
+		7BEB0AC22E5BB64000A377C7 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 26942CEE2DABD3B400B82507 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 7BEB0AAE2E5BB63F00A377C7;
+			remoteInfo = "Swift-TTS-WidgetsExtension";
 		};
 /* End PBXContainerItemProxy section */
 
@@ -62,6 +73,17 @@
 			name = "Embed Frameworks";
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		7BEB0AC92E5BB64000A377C7 /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				7BEB0AC42E5BB64000A377C7 /* Swift-TTS-WidgetsExtension.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
@@ -70,6 +92,10 @@
 		26942CF62DABD3B400B82507 /* Swift-TTS.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Swift-TTS.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		7B9064122E4FE11C000C58D5 /* Swift-TTS.xcodeproj */ = {isa = PBXFileReference; lastKnownFileType = "wrapper.pb-project"; path = "Swift-TTS.xcodeproj"; sourceTree = SOURCE_ROOT; };
 		7BBF57E32DDD06460047DCFF /* Swift-TTS-iOS.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Swift-TTS-iOS.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		7BEB0AAF2E5BB63F00A377C7 /* Swift-TTS-WidgetsExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = "Swift-TTS-WidgetsExtension.appex"; sourceTree = BUILT_PRODUCTS_DIR; };
+		7BEB0AB02E5BB63F00A377C7 /* WidgetKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = WidgetKit.framework; path = System/Library/Frameworks/WidgetKit.framework; sourceTree = SDKROOT; };
+		7BEB0AB22E5BB63F00A377C7 /* SwiftUI.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SwiftUI.framework; path = System/Library/Frameworks/SwiftUI.framework; sourceTree = SDKROOT; };
+		7BEB0ACA2E5BBA9100A377C7 /* TranscriptionLiveActivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = TranscriptionLiveActivity.swift; path = "../../Swift-TTS-Widgets/TranscriptionLiveActivity.swift"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -190,13 +216,35 @@
 				Kokoro/TTSEngine/KokoroWeightLoader.swift,
 				Kokoro/TTSEngine/ProsodyPredictor.swift,
 				Kokoro/TTSEngine/TextEncoder.swift,
+				Kokoro/TTSEngine/TTSEnginePool.swift,
 				Kokoro/TTSEngine/VoiceLoader.swift,
 				Kokoro/TTSPerformanceMetrics.swift,
-				Kokoro/Utils/AudioUtils.swift,
 				Kokoro/Utils/BenchmarkTimer.swift,
+				Kokoro/Utils/TranscriptionActivity.swift,
 				Utils/AudioSessionManager.swift,
 			);
 			target = 7BBF57E22DDD06460047DCFF /* Swift-TTS-iOS */;
+		};
+		7BEB0AAA2E5BB55A00A377C7 /* Exceptions for "Swift-TTS-iOS" folder in "Swift-TTS-iOS" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 7BBF57E22DDD06460047DCFF /* Swift-TTS-iOS */;
+		};
+		7BEB0AC82E5BB64000A377C7 /* Exceptions for "Swift-TTS-Widgets" folder in "Swift-TTS-WidgetsExtension" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 7BEB0AAE2E5BB63F00A377C7 /* Swift-TTS-WidgetsExtension */;
+		};
+		7BEB0ACD2E5BBAC600A377C7 /* Exceptions for "Swift-TTS" folder in "Swift-TTS-WidgetsExtension" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Kokoro/Utils/TranscriptionActivity.swift,
+			);
+			target = 7BEB0AAE2E5BB63F00A377C7 /* Swift-TTS-WidgetsExtension */;
 		};
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
@@ -259,13 +307,25 @@
 				7BBF5EDB2DDD179D0047DCFF /* Exceptions for "Swift-TTS" folder in "Embed Frameworks" phase from "Swift-TTS-iOS" target */,
 				2648362A2DAD1252004DA2A4 /* Exceptions for "Swift-TTS" folder in "Swift-TTS-Tests" target */,
 				2648362B2DAD1252004DA2A4 /* Exceptions for "Swift-TTS" folder in "Embed Frameworks" phase from "Swift-TTS-Tests" target */,
+				7BEB0ACD2E5BBAC600A377C7 /* Exceptions for "Swift-TTS" folder in "Swift-TTS-WidgetsExtension" target */,
 			);
 			path = "Swift-TTS";
 			sourceTree = "<group>";
 		};
 		7BBF57E42DDD06460047DCFF /* Swift-TTS-iOS */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				7BEB0AAA2E5BB55A00A377C7 /* Exceptions for "Swift-TTS-iOS" folder in "Swift-TTS-iOS" target */,
+			);
 			path = "Swift-TTS-iOS";
+			sourceTree = "<group>";
+		};
+		7BEB0AB42E5BB63F00A377C7 /* Swift-TTS-Widgets */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				7BEB0AC82E5BB64000A377C7 /* Exceptions for "Swift-TTS-Widgets" folder in "Swift-TTS-WidgetsExtension" target */,
+			);
+			path = "Swift-TTS-Widgets";
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
@@ -303,12 +363,23 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		7BEB0AAC2E5BB63F00A377C7 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				7BEB0AB32E5BB63F00A377C7 /* SwiftUI.framework in Frameworks */,
+				7BEB0AB12E5BB63F00A377C7 /* WidgetKit.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
 		264836262DAD1252004DA2A4 /* Frameworks */ = {
 			isa = PBXGroup;
 			children = (
+				7BEB0AB02E5BB63F00A377C7 /* WidgetKit.framework */,
+				7BEB0AB22E5BB63F00A377C7 /* SwiftUI.framework */,
 			);
 			name = Frameworks;
 			sourceTree = "<group>";
@@ -316,11 +387,13 @@
 		26942CED2DABD3B400B82507 = {
 			isa = PBXGroup;
 			children = (
+				7BEB0ACA2E5BBA9100A377C7 /* TranscriptionLiveActivity.swift */,
 				261E20852DAC2726000711D0 /* readme.md */,
 				7B9064122E4FE11C000C58D5 /* Swift-TTS.xcodeproj */,
 				26942CF82DABD3B400B82507 /* Swift-TTS */,
 				2648361A2DAD10AA004DA2A4 /* Tests */,
 				7BBF57E42DDD06460047DCFF /* Swift-TTS-iOS */,
+				7BEB0AB42E5BB63F00A377C7 /* Swift-TTS-Widgets */,
 				264836262DAD1252004DA2A4 /* Frameworks */,
 				26942CF72DABD3B400B82507 /* Products */,
 			);
@@ -332,6 +405,7 @@
 				26942CF62DABD3B400B82507 /* Swift-TTS.app */,
 				264836192DAD10AA004DA2A4 /* Swift-TTS-Tests.xctest */,
 				7BBF57E32DDD06460047DCFF /* Swift-TTS-iOS.app */,
+				7BEB0AAF2E5BB63F00A377C7 /* Swift-TTS-WidgetsExtension.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -405,10 +479,12 @@
 				7BBF57E02DDD06460047DCFF /* Frameworks */,
 				7BBF57E12DDD06460047DCFF /* Resources */,
 				7BBF58302DDF0A010047DCFF /* Embed Frameworks */,
+				7BEB0AC92E5BB64000A377C7 /* Embed Foundation Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				7BEB0AC32E5BB64000A377C7 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				7BBF57E42DDD06460047DCFF /* Swift-TTS-iOS */,
@@ -425,6 +501,28 @@
 			productReference = 7BBF57E32DDD06460047DCFF /* Swift-TTS-iOS.app */;
 			productType = "com.apple.product-type.application";
 		};
+		7BEB0AAE2E5BB63F00A377C7 /* Swift-TTS-WidgetsExtension */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 7BEB0AC52E5BB64000A377C7 /* Build configuration list for PBXNativeTarget "Swift-TTS-WidgetsExtension" */;
+			buildPhases = (
+				7BEB0AAB2E5BB63F00A377C7 /* Sources */,
+				7BEB0AAC2E5BB63F00A377C7 /* Frameworks */,
+				7BEB0AAD2E5BB63F00A377C7 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				7BEB0AB42E5BB63F00A377C7 /* Swift-TTS-Widgets */,
+			);
+			name = "Swift-TTS-WidgetsExtension";
+			packageProductDependencies = (
+			);
+			productName = "Swift-TTS-WidgetsExtension";
+			productReference = 7BEB0AAF2E5BB63F00A377C7 /* Swift-TTS-WidgetsExtension.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -432,8 +530,8 @@
 			isa = PBXProject;
 			attributes = {
 				BuildIndependentTargetsInParallel = 1;
-				LastSwiftUpdateCheck = 1630;
-				LastUpgradeCheck = 1600;
+				LastSwiftUpdateCheck = 2600;
+				LastUpgradeCheck = 2600;
 				TargetAttributes = {
 					264836182DAD10AA004DA2A4 = {
 						CreatedOnToolsVersion = 16.0;
@@ -444,6 +542,9 @@
 					};
 					7BBF57E22DDD06460047DCFF = {
 						CreatedOnToolsVersion = 16.3;
+					};
+					7BEB0AAE2E5BB63F00A377C7 = {
+						CreatedOnToolsVersion = 26.0;
 					};
 				};
 			};
@@ -474,6 +575,7 @@
 				26942CF52DABD3B400B82507 /* Swift-TTS */,
 				7BBF57E22DDD06460047DCFF /* Swift-TTS-iOS */,
 				264836182DAD10AA004DA2A4 /* Swift-TTS-Tests */,
+				7BEB0AAE2E5BB63F00A377C7 /* Swift-TTS-WidgetsExtension */,
 			);
 		};
 /* End PBXProject section */
@@ -495,6 +597,13 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 		7BBF57E12DDD06460047DCFF /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		7BEB0AAD2E5BB63F00A377C7 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -525,6 +634,14 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		7BEB0AAB2E5BB63F00A377C7 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				7BEB0ACB2E5BBA9200A377C7 /* TranscriptionLiveActivity.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -532,6 +649,11 @@
 			isa = PBXTargetDependency;
 			target = 26942CF52DABD3B400B82507 /* Swift-TTS */;
 			targetProxy = 2648361D2DAD10AA004DA2A4 /* PBXContainerItemProxy */;
+		};
+		7BEB0AC32E5BB64000A377C7 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 7BEB0AAE2E5BB63F00A377C7 /* Swift-TTS-WidgetsExtension */;
+			targetProxy = 7BEB0AC22E5BB64000A377C7 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -543,10 +665,13 @@
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				DEAD_CODE_STRIPPING = YES;
 				DEFINES_MODULE = YES;
 				DEVELOPMENT_TEAM = "";
+				ENABLE_MODULE_VERIFIER = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				MARKETING_VERSION = 1.0;
+				MODULE_VERIFIER_SUPPORTED_LANGUAGE_STANDARDS = "gnu17 gnu++20";
 				PRODUCT_BUNDLE_IDENTIFIER = "com.lumen-digital.Swift-TTS-Tests";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = NO;
@@ -562,10 +687,13 @@
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				DEAD_CODE_STRIPPING = YES;
 				DEFINES_MODULE = YES;
 				DEVELOPMENT_TEAM = "";
+				ENABLE_MODULE_VERIFIER = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				MARKETING_VERSION = 1.0;
+				MODULE_VERIFIER_SUPPORTED_LANGUAGE_STANDARDS = "gnu17 gnu++20";
 				PRODUCT_BUNDLE_IDENTIFIER = "com.lumen-digital.Swift-TTS-Tests";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = NO;
@@ -608,6 +736,7 @@
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
+				DEAD_CODE_STRIPPING = YES;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
@@ -632,6 +761,7 @@
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
 				SDKROOT = macosx;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 			};
@@ -671,6 +801,7 @@
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
+				DEAD_CODE_STRIPPING = YES;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
@@ -688,6 +819,7 @@
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				SDKROOT = macosx;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_COMPILATION_MODE = wholemodule;
 			};
 			name = Release;
@@ -701,10 +833,13 @@
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
+				DEAD_CODE_STRIPPING = YES;
 				DEVELOPMENT_ASSET_PATHS = "\"Swift-TTS/Preview Content\"";
 				DEVELOPMENT_TEAM = "";
+				ENABLE_APP_SANDBOX = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
+				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -729,10 +864,13 @@
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
+				DEAD_CODE_STRIPPING = YES;
 				DEVELOPMENT_ASSET_PATHS = "\"Swift-TTS/Preview Content\"";
 				DEVELOPMENT_TEAM = "";
+				ENABLE_APP_SANDBOX = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
+				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -759,12 +897,15 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				HEADER_SEARCH_PATHS = "$(PROJECT_DIR)/Frameworks/SentenceSegmentKit/Bridge";
+				INFOPLIST_FILE = "Swift-TTS-iOS/Info.plist";
+				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Used to transcribe saved audio on device";
+				INFOPLIST_KEY_NSSupportsLiveActivities = YES;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
-				IPHONEOS_DEPLOYMENT_TARGET = 18.4;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.6;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -791,12 +932,15 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				HEADER_SEARCH_PATHS = "$(PROJECT_DIR)/Frameworks/SentenceSegmentKit/Bridge";
+				INFOPLIST_FILE = "Swift-TTS-iOS/Info.plist";
+				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Used to transcribe saved audio on device";
+				INFOPLIST_KEY_NSSupportsLiveActivities = YES;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
-				IPHONEOS_DEPLOYMENT_TARGET = 18.4;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.6;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -806,6 +950,73 @@
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
 				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+		7BEB0AC62E5BB64000A377C7 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				ASSETCATALOG_COMPILER_WIDGET_BACKGROUND_COLOR_NAME = WidgetBackground;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = TA92TEWDS4;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "Swift-TTS-Widgets/Info.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = "Swift-TTS-Widgets";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				INFOPLIST_KEY_NSSupportsLiveActivities = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.sdesai.lumen-digital.Swift-TTS-iOS.Swift-TTS-Widgets";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		7BEB0AC72E5BB64000A377C7 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				ASSETCATALOG_COMPILER_WIDGET_BACKGROUND_COLOR_NAME = WidgetBackground;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = TA92TEWDS4;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "Swift-TTS-Widgets/Info.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = "Swift-TTS-Widgets";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				INFOPLIST_KEY_NSSupportsLiveActivities = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.sdesai.lumen-digital.Swift-TTS-iOS.Swift-TTS-Widgets";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
 				VALIDATE_PRODUCT = YES;
@@ -847,6 +1058,15 @@
 			buildConfigurations = (
 				7BBF57EB2DDD06470047DCFF /* Debug */,
 				7BBF57EC2DDD06470047DCFF /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		7BEB0AC52E5BB64000A377C7 /* Build configuration list for PBXNativeTarget "Swift-TTS-WidgetsExtension" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				7BEB0AC62E5BB64000A377C7 /* Debug */,
+				7BEB0AC72E5BB64000A377C7 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

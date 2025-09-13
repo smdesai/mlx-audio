@@ -6,8 +6,11 @@ import ESpeakNG
 
 // ESpeakNG wrapper for phonemizing the text strings
 final class ESpeakNGEngine {
+  private static var sharedInstance: ESpeakNGEngine?
+  private static let lock = DispatchSemaphore(value: 1)
+  private static let espeakLock = DispatchSemaphore(value: 1)
+
   private var language: LanguageDialect = .none
-  private var languageMapping: [String: String] = [:]
 
   enum ESpeakNGEngineError: Error {
     case dataBundleNotFound
@@ -33,43 +36,17 @@ final class ESpeakNGEngine {
   }
 
   // After constructing the wrapper, call setLanguage() before phonemizing any text
-  init() throws {
+  // Use shared() to obtain a singleton instance. The underlying C library has global state
+  // and is not designed for concurrent multiple initializations.
+  private init() throws {
     if let bundleURLStr = findDataBundlePath() {
-      let initOK = espeak_Initialize(AUDIO_OUTPUT_PLAYBACK, 0, bundleURLStr, 0)
+      let initOK = espeak_Initialize(AUDIO_OUTPUT_SYNCHRONOUS, 0, bundleURLStr, 0)
 
       if initOK != Constants.successAudioSampleRate {
         print("Internal espseak-ng error, could not initialize")
         throw ESpeakNGEngineError.couldNotInitialize
       }
-
-      var languageList: Set<String> = []
-      let voiceList = espeak_ListVoices(nil)
-      var index = 0
-      while let voicePointer = voiceList?.advanced(by: index).pointee {
-        let voice = voicePointer.pointee
-        if let cLang = voice.languages {
-          let language = String(cString: cLang, encoding: .utf8)!
-            .replacingOccurrences(of: "\u{05}", with: "")
-            .replacingOccurrences(of: "\u{02}", with: "")
-          languageList.insert(language)
-
-          if let cName = voice.identifier {
-            let name = String(cString: cName, encoding: .utf8)!
-              .replacingOccurrences(of: "\u{05}", with: "")
-              .replacingOccurrences(of: "\u{02}", with: "")
-            languageMapping[language] = name
-          }
-        }
-
-        index += 1
-      }
-
-      try LanguageDialect.allCases.forEach {
-        if $0.rawValue.count > 0, !languageList.contains($0.rawValue) {
-          print("Language dialect \($0) not found in espeak-ng voice list")
-          throw ESpeakNGEngineError.languageNotFound
-        }
-      }
+      // Skip exhaustive voice list scanning; set voices by language code directly in setLanguage
     } else {
       print("Couldn't find the espeak-ng data bundle, cannot initialize")
       throw ESpeakNGEngineError.dataBundleNotFound
@@ -82,16 +59,26 @@ final class ESpeakNGEngine {
     print("ESpeakNGEngine termination OK: \(terminateOK == EE_OK)")
   }
 
+  static func shared() throws -> ESpeakNGEngine {
+    lock.wait()
+    defer { lock.signal() }
+    if let inst = sharedInstance { return inst }
+    let engine = try ESpeakNGEngine()
+    sharedInstance = engine
+    return engine
+  }
+
   // Sets the language that will be used for phonemizing
   // If the function returns without throwing an exception then consider new language set!
   func setLanguage(for voice: TTSVoice) throws {
-    guard let language = Constants.voice2Language[voice],
-          let name = languageMapping[language.rawValue]
-    else {
+    guard let language = Constants.voice2Language[voice] else {
       throw ESpeakNGEngineError.languageNotFound
     }
 
-    let result = espeak_SetVoiceByName((name as NSString).utf8String)
+    // Set by language code directly (e.g., "en-us"); avoids scanning large voice lists
+    Self.espeakLock.wait()
+    let result = espeak_SetVoiceByName((language.rawValue as NSString).utf8String)
+    Self.espeakLock.signal()
 
     if result == EE_NOT_FOUND {
       throw ESpeakNGEngineError.languageNotFound
@@ -128,7 +115,11 @@ final class ESpeakNGEngine {
       withUnsafeMutablePointer(to: &textPtr) { ptr in
         var resultWords: [String] = []
         while ptr.pointee != nil {
-          if let result = ESpeakNG.espeak_TextToPhonemes(ptr, espeakCHARS_UTF8, phonemes_mode) {
+          var result: UnsafePointer<CChar>?
+          Self.espeakLock.wait()
+          result = ESpeakNG.espeak_TextToPhonemes(ptr, espeakCHARS_UTF8, phonemes_mode)
+          Self.espeakLock.signal()
+          if let result {
             // Create a copy of the returned string to ensure we own the memory
             resultWords.append(String(cString: result, encoding: .utf8)!)
           }
@@ -174,10 +165,11 @@ final class ESpeakNGEngine {
 
   // Find the data bundle that is inside the framework
   private func findDataBundlePath() -> String? {
+    // Resolve the inner "espeak-ng-data" directory within the bundle
     if let frameworkBundle = Bundle(identifier: "com.kokoro.espeakng"),
-       let dataBundleURL = frameworkBundle.url(forResource: "espeak-ng-data", withExtension: "bundle")
-    {
-      return dataBundleURL.path
+       let dataBundleURL = frameworkBundle.url(forResource: "espeak-ng-data", withExtension: "bundle") {
+      let dataDir = dataBundleURL.appendingPathComponent("espeak-ng-data")
+      return FileManager.default.fileExists(atPath: dataDir.path) ? dataDir.path : dataBundleURL.path
     }
     return nil
   }

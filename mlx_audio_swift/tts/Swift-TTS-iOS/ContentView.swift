@@ -10,23 +10,31 @@ import MLX
 
 struct ContentView: View {
     @State private var speed = 1.0
-    @State private var sentenceSplitThreshold: Float = 0.01
+    @State private var sentenceSplitThreshold: Float = 0.1
 
     @State public var text = ""
     @State private var showAlert = false
     @State private var isStreamingMode = false
     @State private var streamingTimer: Timer?
-    @State private var showSettings = false
+    @State private var showSettingsSheet = false
     @State private var isModelReady = false
     @State private var showFileManager = false
     @State private var isSavingAudio = false
     @State private var showSaveSuccess = false
     @State private var lastSavedFileName = ""
 
+    // Debug: Live Activity testing
+    #if DEBUG
+    @State private var debugLAStarted = false
+    @State private var debugLAProgress = 0
+    @State private var debugLATotal = 5
+    @State private var debugLAStatus = "Idle"
+    #endif
+
     @FocusState private var isTextEditorFocused: Bool
     @ObservedObject var viewModel: KokoroTTSModel
     @StateObject private var speakerModel = SpeakerViewModel()
-    @StateObject private var audioFileManager = AudioFileManager()
+    @StateObject private var audioFileManager = AudioFileManager.shared
 
     @Environment(\.colorScheme) var colorScheme
 
@@ -53,9 +61,6 @@ struct ContentView: View {
                             // Speaker selection card
                             speakerCard
 
-                            // Settings card
-                            settingsCard
-
                             // Text input card
                             textInputCard
 
@@ -80,6 +85,18 @@ struct ContentView: View {
                     }
                 }
             }
+            .toolbar {
+                ToolbarItemGroup(placement: .topBarTrailing) {
+                    Button(action: { showFileManager = true }) {
+                        Image(systemName: "folder")
+                    }
+                    Button(action: { showSettingsSheet = true }) {
+                        Image(systemName: "gearshape")
+                    }
+                }
+            }
+            .navigationTitle("Kokoro TTS")
+            .navigationBarTitleDisplayMode(.inline)
         }
         .tint(.accentColor)
         // Sync viewModel.generationInProgress to speakerModel.isGenerating
@@ -98,10 +115,35 @@ struct ContentView: View {
         .sheet(isPresented: $showFileManager) {
             FileManagementView()
         }
+        .sheet(isPresented: $showSettingsSheet) {
+            #if DEBUG
+            SettingsSheetView(
+                speed: $speed,
+                isStreamingMode: $isStreamingMode,
+                sentenceSplitThreshold: $sentenceSplitThreshold,
+                viewModel: viewModel,
+                speakerModel: speakerModel,
+                debugLAStarted: $debugLAStarted,
+                debugLAProgress: $debugLAProgress,
+                debugLATotal: $debugLATotal,
+                debugLAStatus: $debugLAStatus
+            )
+            #else
+            SettingsSheetView(
+                speed: $speed,
+                isStreamingMode: $isStreamingMode,
+                sentenceSplitThreshold: $sentenceSplitThreshold,
+                viewModel: viewModel,
+                speakerModel: speakerModel
+            )
+            #endif
+        }
+        
         .overlay {
-            if showSaveSuccess {
-                VStack {
-                    Spacer()
+            VStack {
+                Spacer()
+
+                if showSaveSuccess {
                     HStack {
                         Image(systemName: "checkmark.circle.fill")
                         Text("Audio saved successfully!")
@@ -116,55 +158,52 @@ struct ContentView: View {
                             .shadow(radius: 4)
                     )
                     .transition(.move(edge: .bottom).combined(with: .opacity))
-                    .padding(.bottom, 100)
+                    .padding(.bottom, 12)
                 }
-                .animation(.spring(), value: showSaveSuccess)
+
+                #if DEBUG
+                if debugLAStarted {
+                    VStack(spacing: 6) {
+                        HStack(spacing: 8) {
+                            Image(systemName: "waveform")
+                                .foregroundStyle(.white)
+                            Text("Live Activity: \(debugLAStatus)")
+                                .foregroundStyle(.white)
+                                .font(.caption)
+                                .fontWeight(.semibold)
+                            Spacer(minLength: 0)
+                            Text("\(debugLAProgress)/\(max(debugLATotal,1))")
+                                .foregroundStyle(.white.opacity(0.9))
+                                .font(.caption2)
+                        }
+                        ProgressView(value: Double(min(debugLAProgress, debugLATotal)), total: Double(max(debugLATotal, 1)))
+                            .tint(.white)
+                    }
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+                    .background(
+                        RoundedRectangle(cornerRadius: 12)
+                            .fill(Color.accentColor.opacity(0.9))
+                            .shadow(radius: 4)
+                    )
+                    .padding(.bottom, 60)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                }
+                #endif
             }
+            .animation(.spring(), value: showSaveSuccess)
+            #if DEBUG
+            .animation(.spring(), value: debugLAStarted)
+            .animation(.spring(), value: debugLAProgress)
+            #endif
         }
     }
 
     // MARK: - Header Card
 
     private var headerCard: some View {
-        VStack(spacing: 12) {
-            // Top bar with file manager button
-            HStack {
-                Spacer()
-                Button(action: {
-                    showFileManager = true
-                }) {
-                    Label("Saved", systemImage: "folder.fill")
-                        .font(.caption)
-                        .foregroundStyle(.tint)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 6)
-                        .background(
-                            Capsule()
-                                .fill(Color(.tertiarySystemBackground))
-                        )
-                }
-            }
-            .padding(.horizontal)
-
-            // Logo/Icon
-            Image(systemName: "waveform.circle.fill")
-                .font(.system(size: 60))
-                .foregroundStyle(.tint)
-                .symbolEffect(.pulse, isActive: viewModel.isAudioPlaying)
-
-            HStack(spacing: 8) {
-                Text("Kokoro TTS")
-                    .font(.largeTitle)
-                    .fontWeight(.bold)
-
-                if !isModelReady {
-                    ProgressView()
-                        .controlSize(.small)
-                        .transition(.opacity)
-                }
-            }
-
-            // Performance metrics
+        VStack(spacing: 8) {
+            // Performance metrics (compact)
             VStack(spacing: 8) {
                 HStack {
                     Image(systemName: "timer")
@@ -192,14 +231,14 @@ struct ContentView: View {
                 }
             }
             .foregroundStyle(.secondary)
-            .padding(.horizontal, 16)
+            .padding(.horizontal, 12)
             .padding(.vertical, 8)
             .background(
                 RoundedRectangle(cornerRadius: 12)
                     .fill(Color(.tertiarySystemBackground))
             )
         }
-        .padding(.vertical)
+        .padding(.vertical, 8)
     }
 
     // MARK: - Speaker Card
@@ -272,149 +311,7 @@ struct ContentView: View {
         )
     }
 
-    // MARK: - Settings Card
-
-    private var settingsCard: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            // Header with expandable button
-            Button(action: {
-                withAnimation(.spring(response: 0.3)) {
-                    showSettings.toggle()
-                }
-            }) {
-                HStack {
-                    Label("Settings", systemImage: "slider.horizontal.3")
-                        .font(.headline)
-                    Spacer()
-                    Image(systemName: "chevron.right")
-                        .rotationEffect(.degrees(showSettings ? 90 : 0))
-                }
-            }
-            .foregroundStyle(.primary)
-
-            if showSettings {
-                VStack(spacing: 20) {
-                    // Speed control
-                    VStack(alignment: .leading, spacing: 12) {
-                        HStack {
-                            Label("Speed", systemImage: "speedometer")
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
-                            Spacer()
-                            Text(String(format: "%.1fx", speed))
-                                .font(.headline)
-                                .foregroundStyle(.tint)
-                                .padding(.horizontal, 12)
-                                .padding(.vertical, 4)
-                                .background(
-                                    Capsule()
-                                        .fill(Color(.tertiarySystemBackground))
-                                )
-                        }
-
-                        HStack(spacing: 8) {
-                            Image(systemName: "tortoise.fill")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-
-                            Slider(value: $speed, in: 0.5...2.0, step: 0.1)
-                                .tint(.accentColor)
-
-                            Image(systemName: "hare.fill")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                        .disabled(viewModel.generationInProgress)
-                    }
-
-                    Divider()
-
-                    // Streaming mode toggle
-                    Toggle(isOn: $isStreamingMode) {
-                        HStack {
-                            Image(systemName: "dot.radiowaves.left.and.right")
-                                .foregroundStyle(.tint)
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text("Streaming Mode")
-                                    .font(.subheadline)
-                                Text("Generate audio in real-time")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                    }
-                    .tint(.accentColor)
-                    .disabled(viewModel.generationInProgress || viewModel.isStreaming)
-
-                    // Sentence threshold slider (only shown when streaming mode is on and not using legacy split)
-                    if isStreamingMode && !viewModel.useLegacySentenceSplit {
-                        VStack(alignment: .leading, spacing: 12) {
-                            HStack {
-                                Label("Sentence Threshold", systemImage: "text.badge.checkmark")
-                                    .font(.subheadline)
-                                    .foregroundStyle(.secondary)
-                                Spacer()
-                                Text(String(format: "%.1f", sentenceSplitThreshold))
-                                    .font(.headline)
-                                    .foregroundStyle(.tint)
-                                    .padding(.horizontal, 12)
-                                    .padding(.vertical, 4)
-                                    .background(
-                                        Capsule()
-                                            .fill(Color(.tertiarySystemBackground))
-                                    )
-                            }
-
-                            HStack(spacing: 8) {
-                                Text("0.1")
-                                    .font(.caption2)
-                                    .foregroundStyle(.secondary)
-
-                                Slider(value: $sentenceSplitThreshold, in: 0.1...1.0, step: 0.1)
-                                    .tint(.accentColor)
-
-                                Text("1.0")
-                                    .font(.caption2)
-                                    .foregroundStyle(.secondary)
-                            }
-                            .disabled(viewModel.generationInProgress || viewModel.isStreaming)
-
-                            Text("Lower values split sentences more aggressively")
-                                .font(.caption)
-                                .foregroundStyle(.tertiary)
-                        }
-                        .transition(.opacity.combined(with: .move(edge: .top)))
-                    }
-
-                    // Legacy sentence split toggle
-                    Toggle(isOn: $viewModel.useLegacySentenceSplit) {
-                        HStack {
-                            Image(systemName: "text.line.first.and.arrowtriangle.forward")
-                                .foregroundStyle(.orange)
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text("Legacy Sentence Split")
-                                    .font(.subheadline)
-                                Text("Use traditional tokenizer")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                    }
-                    .tint(.orange)
-                    .disabled(viewModel.generationInProgress || viewModel.isStreaming)
-                }
-                .padding(.top, 8)
-                .transition(.opacity.combined(with: .scale(scale: 0.95, anchor: .top)))
-            }
-        }
-        .padding()
-        .background(
-            RoundedRectangle(cornerRadius: 20)
-                .fill(Color(.systemBackground))
-                .shadow(color: Color.black.opacity(0.05), radius: 10, y: 5)
-        )
-        .clipped()
-    }
+    // Settings moved to toolbar sheet
 
     // MARK: - Text Input Card
 
@@ -590,7 +487,7 @@ struct ContentView: View {
                 let voice = TTSVoice.fromIdentifier(speaker.name) ?? .afHeart
 
                 // Generate and save to file
-                viewModel.generateAndSaveToFile(t, voice, speed: Float(speed), sentenceSplitThreshold: sentenceSplitThreshold) { [weak audioFileManager] fileURL, generationTime, completionTime in
+                viewModel.generateAndSaveToFile(t, voice, speed: Float(speed), sentenceSplitThreshold: sentenceSplitThreshold, transcribeInBackground: true) { [weak audioFileManager] fileURL, generationTime, completionTime in
                     guard let fileURL = fileURL else {
                         // Handle error
                         DispatchQueue.main.async {
@@ -627,6 +524,16 @@ struct ContentView: View {
                             DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
                                 self.showSaveSuccess = false
                             }
+                        }
+
+                        // Schedule background transcription (BGProcessing)
+                        if let savedFile = savedFile {
+                            // Update Live Activity phase now; transcription will run later in BG task
+                            TranscriptionActivityManager.shared.updatePhase(.transcribing, message: "Transcribing…")
+                            let url = audioFileManager!.getFileURL(for: savedFile)
+                            // Request speech auth (if denied, BG task may still fail gracefully)
+                            SpeechTranscriber.shared.requestAuthorization { _ in }
+                            BGTaskManager.shared.scheduleTranscription(id: savedFile.id, fileURL: url)
                         }
                     } catch {
                         print("Failed to save audio file: \(error)")
@@ -732,14 +639,14 @@ struct ContentView: View {
         let speaker = speakerModel.getPrimarySpeaker().first!
         let voice = TTSVoice.fromIdentifier(speaker.name) ?? .afHeart
 
-        viewModel.startStreamingV2(voice: voice, speed: Float(speed))
+        viewModel.startStreaming(voice: voice, speed: Float(speed))
 
         // Simulate text arrival in chunks
         var currentIndex = fullText.startIndex
         streamingTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { timer in
             if currentIndex >= fullText.endIndex {
                 // End streaming when all text is sent
-                viewModel.endStreamingV2()
+                viewModel.endStreaming()
                 timer.invalidate()
                 return
             }
@@ -749,7 +656,7 @@ struct ContentView: View {
             let endIndex = fullText.index(currentIndex, offsetBy: chunkSize, limitedBy: fullText.endIndex) ?? fullText.endIndex
             let chunk = String(fullText[currentIndex..<endIndex])
 
-            viewModel.addStreamingTextV2(chunk, sentenceSplitThreshold: sentenceSplitThreshold)
+            viewModel.addStreamingText(chunk, sentenceSplitThreshold: sentenceSplitThreshold)
             currentIndex = endIndex
         }
     }
@@ -757,7 +664,7 @@ struct ContentView: View {
     private func stopStreaming() {
         streamingTimer?.invalidate()
         streamingTimer = nil
-        viewModel.stopStreamingV2()
+        viewModel.stopStreaming()
     }
 }
 
