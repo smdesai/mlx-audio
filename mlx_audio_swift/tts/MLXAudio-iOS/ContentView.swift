@@ -30,7 +30,9 @@ enum TTSProvider: String, CaseIterable {
 
 struct ContentView: View {
     // MARK: - Constants
-    private let mlxGPUCacheLimit = 20 * 1024 * 1024  // 20MB cache limit
+    private let mlxGPUCacheLimit = 20 * 1024 * 1024  // 20MB cache limit for Kokoro
+    private let mlxGPUCacheLimitMarvis100M = 60 * 1024 * 1024  // 60MB for Marvis 100M 6-bit
+    private let mlxGPUCacheLimitMarvis250M = 100 * 1024 * 1024  // 100MB for Marvis 250M
     
     // MARK: - State Properties
     @State private var speed = 1.0
@@ -49,11 +51,14 @@ struct ContentView: View {
     @State private var isMarvisLoading = false
     @State private var isMarvisPlaying = false
     @State private var status = ""
+    @StateObject private var marvisLoadingProgress = MarvisLoadingProgress()
+    @State private var chosenModel: MarvisSession.Model = .marvis250M
+    @State private var loadedModel: MarvisSession.Model? = nil
     @State private var chosenVoice = "conversational_a"
     @State private var chosenQuality: MarvisSession.QualityLevel = .maximum
     @State private var marvisAudioGenerationTime: TimeInterval = 0
     @State private var useStreaming: Bool = false
-    @State private var streamingInterval: Double = 0.5
+    @State private var streamingInterval: Double = 1.0  // Increased from 0.5 for better performance
 
     @StateObject private var speakerModel = SpeakerViewModel()
     
@@ -61,7 +66,7 @@ struct ContentView: View {
         NavigationStack {
             ZStack {
                 backgroundView
-                
+
                 ScrollView(showsIndicators: false) {
                     VStack(spacing: 16) {
                         // Provider Status Header
@@ -119,8 +124,33 @@ struct ContentView: View {
                             }
                         }
 
-                        // Quality picker for Marvis
+                        // Model picker for Marvis
                         if chosenProvider == .marvis {
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text("Model")
+                                    .font(.subheadline)
+                                    .foregroundStyle(.secondary)
+
+                                VStack(spacing: 12) {
+                                    ForEach(MarvisSession.Model.allCases) { model in
+                                        modelSelectionCard(model: model)
+                                    }
+                                }
+
+                                if let loaded = loadedModel, loaded != chosenModel {
+                                    HStack(spacing: 6) {
+                                        Image(systemName: "exclamationmark.triangle.fill")
+                                            .font(.caption)
+                                            .foregroundStyle(.orange)
+                                        Text("Switching models will reload the session")
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                    .padding(.top, 4)
+                                }
+                            }
+
+                            // Quality picker for Marvis
                             VStack(alignment: .leading, spacing: 8) {
                                 Text("Quality")
                                     .font(.subheadline)
@@ -164,11 +194,11 @@ struct ContentView: View {
                                             .bold()
                                     }
 
-                                    Slider(value: $streamingInterval, in: 0.1...1.0, step: 0.1)
+                                    Slider(value: $streamingInterval, in: 0.5...2.0, step: 0.1)
                                         .tint(.accentColor)
                                         .disabled(isMarvisLoading)
 
-                                    Text("Time between audio chunks (lower = faster response)")
+                                    Text(streamingIntervalRecommendation)
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
                                 }
@@ -206,6 +236,13 @@ struct ContentView: View {
                         dismissKeyboard()
                         isTextEditorFocused = false
                     }
+                }
+
+                // Show beautiful loading view when initializing Marvis
+                if isMarvisLoading && marvisSession == nil {
+                    MarvisLoadingView(progress: marvisLoadingProgress)
+                        .zIndex(100)
+                        .animation(.easeInOut, value: isMarvisLoading)
                 }
             }
         }
@@ -360,14 +397,35 @@ struct ContentView: View {
                         MLX.GPU.set(cacheLimit: mlxGPUCacheLimit)
                         kokoroViewModel.say(text, TTSVoice.fromIdentifier(speaker.name) ?? .afHeart, speed: Float(speed))
                     } else if chosenProvider == .marvis {
-                        // Initialize Marvis TTS if needed
+                        // Set appropriate GPU cache limit for Marvis model
+                        let cacheLimit = chosenModel == .marvis100M6bit ? mlxGPUCacheLimitMarvis100M : mlxGPUCacheLimitMarvis250M
+                        MLX.GPU.set(cacheLimit: cacheLimit)
+
+                        // Initialize Marvis TTS if needed with detailed progress tracking
                         if marvisSession == nil {
                             isMarvisLoading = true
                             do {
-                                marvisSession = try await MarvisSession.fromPretrained(progressHandler: { _ in })
+                                let selectedMarvisVoice: MarvisSession.Voice
+                                if chosenVoice == "conversational_a" {
+                                    selectedMarvisVoice = .conversationalA
+                                } else if chosenVoice == "conversational_b" {
+                                    selectedMarvisVoice = .conversationalB
+                                } else {
+                                    selectedMarvisVoice = .conversationalA // Default fallback
+                                }
+
+                                marvisSession = try await MarvisSession.initializeWithDetailedProgress(
+                                    voice: selectedMarvisVoice,
+                                    model: chosenModel,
+                                    playbackEnabled: true,
+                                    loadingProgress: marvisLoadingProgress
+                                )
+                                loadedModel = chosenModel
                                 isMarvisLoading = false
+                                status = "Marvis loaded successfully!"
                             } catch {
                                 isMarvisLoading = false
+                                status = "Failed to load Marvis: \(error.localizedDescription)"
                                 return
                             }
                         }
@@ -479,6 +537,55 @@ struct ContentView: View {
 
     // MARK: - Helper Functions
 
+    private func modelSelectionCard(model: MarvisSession.Model) -> some View {
+        Button {
+            // If switching models and one is already loaded, clear the session
+            if let loaded = loadedModel, loaded != model {
+                marvisSession = nil
+                loadedModel = nil
+            }
+            chosenModel = model
+        } label: {
+            HStack(spacing: 12) {
+                // Selection indicator
+                Image(systemName: chosenModel == model ? "checkmark.circle.fill" : "circle")
+                    .font(.title3)
+                    .foregroundStyle(chosenModel == model ? .blue : .secondary)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack {
+                        Text(model.displayName)
+                            .font(.subheadline)
+                            .fontWeight(.semibold)
+                            .foregroundStyle(.primary)
+
+                        Spacer()
+
+                        Text(model.sizeDescription)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Text(model.description)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.leading)
+                }
+            }
+            .padding(12)
+            .background(
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(chosenModel == model ? Color.blue.opacity(0.1) : Color(.tertiarySystemBackground))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 12)
+                    .stroke(chosenModel == model ? Color.blue : Color.clear, lineWidth: 2)
+            )
+        }
+        .buttonStyle(.plain)
+        .disabled(isMarvisLoading)
+    }
+
     private var qualityDescription: String {
         switch chosenQuality {
         case .low:
@@ -489,6 +596,16 @@ struct ContentView: View {
             return "24 codebooks - Slower, better quality"
         case .maximum:
             return "32 codebooks - Slowest, best quality"
+        }
+    }
+
+    private var streamingIntervalRecommendation: String {
+        if streamingInterval < 0.8 {
+            return "Fast response (best for low quality)"
+        } else if streamingInterval < 1.2 {
+            return "Balanced (recommended for medium quality)"
+        } else {
+            return "Efficient (recommended for high/maximum quality)"
         }
     }
 }

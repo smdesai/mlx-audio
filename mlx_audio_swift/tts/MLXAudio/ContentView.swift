@@ -17,11 +17,14 @@ struct ContentView: View {
     @State private var orpheusTTSModel: OrpheusTTSModel? = nil
     @State private var marvisSession: MarvisSession? = nil
     @State private var marvisLastAudioURL: URL?
+    @StateObject private var marvisLoadingProgress = MarvisLoadingProgress()
 
     @State private var text: String = "Hello Everybody"
     @State private var status: String = ""
 
     @State private var chosenProvider: TTSProvider = .marvis
+    @State private var chosenModel: MarvisSession.Model = .marvis250M
+    @State private var loadedModel: MarvisSession.Model? = nil
     @State private var chosenVoice: String = MarvisSession.Voice.conversationalA.rawValue
     @State private var chosenQuality: MarvisSession.QualityLevel = .maximum
 
@@ -37,7 +40,7 @@ struct ContentView: View {
 
     // Streaming setting
     @State private var useStreaming: Bool = false
-    @State private var streamingInterval: Double = 0.5
+    @State private var streamingInterval: Double = 1.0  // Increased from 0.5 for better performance
 
     // Inspector visibility
     @State private var isInspectorPresent: Bool = true
@@ -74,23 +77,33 @@ struct ContentView: View {
                 // Right: Inspector Panel
                 TTSInspectorView(
                     selectedProvider: $chosenProvider,
+                    selectedModel: $chosenModel,
                     selectedVoice: $chosenVoice,
                     selectedQuality: $chosenQuality,
                     status: $status,
                     autoPlay: $autoPlay,
                     useStreaming: $useStreaming,
                     streamingInterval: $streamingInterval,
+                    loadedModel: loadedModel,
                     isGenerating: isCurrentlyGenerating,
                     canGenerate: canGenerate,
                     marvisSession: marvisSession,
                     onGenerate: handleGenerate,
-                    onStop: handleStop
+                    onStop: handleStop,
+                    onModelChange: handleModelChange
                 )
                 .inspectorColumnWidth(min: 250, ideal: 300, max: 400)
             }
         }
         .frame(minWidth: 1200, minHeight: 700)
         .navigationTitle("MLX Audio")
+        .overlay {
+            // Show beautiful loading view when initializing Marvis
+            if isMarvisLoading && marvisSession == nil {
+                MarvisLoadingView(progress: marvisLoadingProgress)
+                    .animation(.easeInOut, value: isMarvisLoading)
+            }
+        }
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Button(action: { isInspectorPresent.toggle() }) {
@@ -159,6 +172,15 @@ struct ContentView: View {
         status = "Generation stopped"
     }
 
+    private func handleModelChange() {
+        // If switching models and one is already loaded, clear the session
+        if let loaded = loadedModel, loaded != chosenModel {
+            marvisSession = nil
+            loadedModel = nil
+            status = "Model changed. Session will reload on next generation."
+        }
+    }
+
     // MARK: - TTS Generation Methods
 
     private func generateWithKokoro() {
@@ -218,14 +240,23 @@ struct ContentView: View {
             status = "Loading Marvis..."
             defer { isMarvisLoading = false }
 
+            // Set appropriate GPU cache limit for Marvis model
+            // macOS has more memory, so use larger limits
+            let cacheLimit = chosenModel == .marvis100M6bit ? 100 * 1024 * 1024 : 200 * 1024 * 1024
+            MLX.GPU.set(cacheLimit: cacheLimit)
+
             guard let voice = MarvisSession.Voice(rawValue: chosenVoice) else {
                 status = "\(chosenProvider.errorMessage)\(chosenVoice)"
                 return false
             }
 
-            marvisSession = try await MarvisSession(voice: voice, progressHandler: { progress in
-                status = "Loading Marvis: \(Int(progress.fractionCompleted * 100))%"
-            }, playbackEnabled: autoPlay)
+            marvisSession = try await MarvisSession.initializeWithDetailedProgress(
+                voice: voice,
+                model: chosenModel,
+                playbackEnabled: autoPlay,
+                loadingProgress: marvisLoadingProgress
+            )
+            loadedModel = chosenModel
             status = "Marvis loaded successfully!"
             return true
         } catch {

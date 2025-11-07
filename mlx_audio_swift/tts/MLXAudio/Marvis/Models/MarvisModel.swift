@@ -422,6 +422,10 @@ public final class MarvisModel: Module {
     public var decoderCache: [KVCache]? = nil
     public var cachesEnabled: Bool = false
 
+    // Pre-computed constants for performance
+    private var codebookOffsets: [Int32] = []
+    private var decoderConfigCache: LlamaConfiguration? = nil
+
     public init(config: MarvisModelArgs) throws {
         self.args = config
 
@@ -461,6 +465,15 @@ public final class MarvisModel: Module {
         self.backboneCache = nil
         self.decoderCache = nil
         self.cachesEnabled = false
+
+        // Pre-compute codebook offsets for performance (avoids repeated multiplication)
+        // Use config parameter to avoid capturing self in closure
+        let numCodebooks = config.audioNumCodebooks
+        let vocabSize = config.audioVocabSize
+        self.codebookOffsets = (0..<numCodebooks).map { Int32($0 * vocabSize) }
+
+        // Cache decoder configuration to avoid recreation on every generateFrame call
+        self.decoderConfigCache = decCfg
     }
 
     public func cachesAreEnabled() -> Bool { cachesEnabled }
@@ -498,10 +511,14 @@ public final class MarvisModel: Module {
         precondition(cachesEnabled, "backbone caches are not enabled")
 
         let embeds = _embedTokens(tokens) // [B, T, Cb+1, D]
+        embeds.eval() // Force embedding computation
+
         let masked = embeds * tokensMask.expandedDimensions(axis: -1) // [B, T, Cb+1, D]
         var h = sum(masked, axis: 2) // [B, T, D]
+        h.eval() // Force masking and sum
 
         h = backbone(h, cache: backboneCache) // [B, T, D]
+        h.eval() // CRITICAL: Force backbone computation before slicing
 
         let B = h.shape[0]
         let D_backbone = h.shape[2]
@@ -514,26 +531,19 @@ public final class MarvisModel: Module {
         let c0SampleVec = sampler(c0Logits) // [B]
         let c0Sample = c0SampleVec.expandedDimensions(axis: -1) // [B, 1]
         let c0Embed = _embedAudio(codebook: 0, tokens: c0Sample) // [B, 1, D_backbone]
+        c0Embed.eval() // Force c0 embedding
 
         let lastH3 = expandedDimensions(lastH, axis: 1) // [B, 1, D_backbone]
         var currH = concatenated([lastH3, c0Embed], axis: 1) // [B, 2, D_backbone]
+        currH.eval() // Force concatenation
         var currSample = c0Sample // [B, 1]
 
         let basePos = MLXArray.arange(2).reshaped([1, 2])
         var currPos = repeated(basePos, count: B, axis: 0) // [B, 2]
 
-        let decCfg: LlamaConfiguration
-        if let depth = args.depthDecoderConfig {
-            decCfg = createLlamaConfigurationForDecoder(depth)
-        } else {
-            guard let decoderFlavor = args.decoderFlavor else {
-                fatalError("Either depthDecoderConfig or decoderFlavor must be provided")
-            }
-            do {
-                decCfg = try createLlamaConfiguration(flavor: decoderFlavor)
-            } catch {
-                fatalError("Failed to create LlamaConfiguration for decoder: \(error). Decoder flavor: \(decoderFlavor)")
-            }
+        // Use cached decoder configuration instead of recreating every frame
+        guard let decCfg = decoderConfigCache else {
+            fatalError("Decoder configuration cache not initialized")
         }
         decoderCache = (0..<decCfg.hiddenLayers).map { _ in KVCache(headDim: decCfg.resolvedHeadDimensions, nKVHeads: decCfg.kvHeads) }
 
@@ -541,6 +551,7 @@ public final class MarvisModel: Module {
         if codeBooks > 1 {
             for i in 1 ..< codeBooks {
                 let decH = decoder(projection(currH), cache: decoderCache) // [B, Tcur, D_dec]
+                decH.eval() // Force decoder computation
 
                 let D_dec = decH.shape[2]
                 let lastSplit1 = split(decH, indices: [decH.shape[1] - 1], axis: 1)
@@ -552,20 +563,28 @@ public final class MarvisModel: Module {
                 let ciSampleVec = sampler(ciLogits) // [B]
                 let ciSample = expandedDimensions(ciSampleVec, axis: -1) // [B, 1]
                 let ciEmbed = _embedAudio(codebook: i, tokens: ciSample) // [B, 1, D_backbone]
+                ciEmbed.eval() // Force codebook embedding
 
                 currH = ciEmbed // [B, 1, D_backbone]
                 currSample = concatenated([currSample, ciSample], axis: 1)
+                currSample.eval() // Force sample concatenation
                 currPos = split(currPos, indices: [1], axis: 1)[1] + MLXArray(1)
             }
         }
 
+        currSample.eval() // Final evaluation before return
         return currSample // [B, codeBooks]
     }
 
     private func _embedAudio(codebook: Int, tokens: MLXArray) -> MLXArray {
-        let offset = codebook * args.audioVocabSize
-        let shifted = tokens + MLXArray(offset)
-        return audio_embeddings(shifted)
+        return autoreleasepool {
+            // Use pre-computed offset instead of repeated multiplication
+            let offset = codebookOffsets[codebook]
+            let shifted = tokens + MLXArray(offset)
+            let embedding = audio_embeddings(shifted)
+            embedding.eval()
+            return embedding
+        }
     }
 
     private func _embedTokens(_ tokens: MLXArray) -> MLXArray {

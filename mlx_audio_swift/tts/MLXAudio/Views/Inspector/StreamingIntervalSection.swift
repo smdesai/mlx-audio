@@ -24,11 +24,21 @@ struct StreamingIntervalSection: View {
                     .bold()
             }
 
-            Slider(value: $streamingInterval, in: 0.1...1.0, step: 0.1)
+            Slider(value: $streamingInterval, in: 0.5...2.0, step: 0.1)
 
-            Text("Time between audio chunks (lower = faster response, higher = more efficient)")
+            Text("Chunk duration: \(recommendationText)")
                 .font(.caption)
                 .foregroundColor(.secondary)
+        }
+    }
+
+    private var recommendationText: String {
+        if streamingInterval < 0.8 {
+            return "Fast response (best for low quality)"
+        } else if streamingInterval < 1.2 {
+            return "Balanced (recommended for medium quality)"
+        } else {
+            return "Efficient (recommended for high/maximum quality)"
         }
     }
 }

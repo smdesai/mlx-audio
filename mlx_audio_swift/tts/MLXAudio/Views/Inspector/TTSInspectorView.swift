@@ -12,6 +12,7 @@ import UIKit
 
 struct TTSInspectorView: View {
     @Binding var selectedProvider: TTSProvider
+    @Binding var selectedModel: MarvisSession.Model
     @Binding var selectedVoice: String
     @Binding var selectedQuality: MarvisSession.QualityLevel
     @Binding var status: String
@@ -19,11 +20,13 @@ struct TTSInspectorView: View {
     @Binding var useStreaming: Bool
     @Binding var streamingInterval: Double
 
+    let loadedModel: MarvisSession.Model?
     let isGenerating: Bool
     let canGenerate: Bool
     let marvisSession: MarvisSession?
     let onGenerate: () -> Void
     let onStop: () -> Void
+    let onModelChange: () -> Void
 
     private var controlBackgroundColor: Color {
         #if os(macOS)
@@ -53,6 +56,16 @@ struct TTSInspectorView: View {
                     )
 
                     Divider()
+
+                    // Marvis Model Selection (Marvis only)
+                    if selectedProvider == .marvis {
+                        MarvisModelPickerSection(
+                            selectedModel: $selectedModel,
+                            loadedModel: loadedModel,
+                            onModelChange: onModelChange
+                        )
+                        Divider()
+                    }
 
                     // Quality Section (Marvis only)
                     if selectedProvider == .marvis {

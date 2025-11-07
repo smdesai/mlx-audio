@@ -168,7 +168,9 @@
 				Kokoro/Utils/BenchmarkTimer.swift,
 				"Marvis/Audio/Audio+MLXArray.swift",
 				Marvis/AudioPlayback.swift,
+				Marvis/MarvisLoadingProgress.swift,
 				Marvis/MarvisSession.swift,
+				"Marvis/MarvisSession+DetailedProgress.swift",
 				Marvis/Mimi/Conv.swift,
 				Marvis/Mimi/KVCache.swift,
 				Marvis/Mimi/Mimi.swift,
@@ -714,7 +716,7 @@
 				CODE_SIGN_ENTITLEMENTS = "MLXAudio-iOS/MLXAudio-iOS.entitlements";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = YQZQG7N4WG;
+				DEVELOPMENT_TEAM = TA92TEWDS4;
 				ENABLE_PREVIEWS = YES;
 				FRAMEWORK_SEARCH_PATHS = (
 					"$(inherited)",
@@ -739,7 +741,7 @@
 					"-framework",
 					ESpeakNG,
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = "com.lumen-digital.MLXAudio-iOS";
+				PRODUCT_BUNDLE_IDENTIFIER = "com.sdesai.lumen-digital.MLXAudio-iOS";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -757,7 +759,7 @@
 				CODE_SIGN_ENTITLEMENTS = "MLXAudio-iOS/MLXAudio-iOS.entitlements";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = YQZQG7N4WG;
+				DEVELOPMENT_TEAM = TA92TEWDS4;
 				ENABLE_PREVIEWS = YES;
 				FRAMEWORK_SEARCH_PATHS = (
 					"$(inherited)",
@@ -782,7 +784,7 @@
 					"-framework",
 					ESpeakNG,
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = "com.lumen-digital.MLXAudio-iOS";
+				PRODUCT_BUNDLE_IDENTIFIER = "com.sdesai.lumen-digital.MLXAudio-iOS";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
 				SWIFT_EMIT_LOC_STRINGS = YES;

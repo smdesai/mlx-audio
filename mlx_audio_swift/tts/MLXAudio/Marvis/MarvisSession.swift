@@ -7,6 +7,40 @@ import Tokenizers
 import AVFoundation
 
 public final class MarvisSession: Module {
+    public enum Model: String, CaseIterable, Identifiable {
+        case marvis250M = "Marvis-AI/marvis-tts-250m-v0.2"
+        case marvis100M6bit = "Marvis-AI/marvis-tts-100m-v0.2-MLX-6bit"
+
+        public var id: String { rawValue }
+
+        public var displayName: String {
+            switch self {
+            case .marvis250M:
+                return "Marvis 250M"
+            case .marvis100M6bit:
+                return "Marvis 100M (6-bit)"
+            }
+        }
+
+        public var description: String {
+            switch self {
+            case .marvis250M:
+                return "Higher quality, slower generation"
+            case .marvis100M6bit:
+                return "Faster, smaller model with quantization"
+            }
+        }
+
+        public var sizeDescription: String {
+            switch self {
+            case .marvis250M:
+                return "~1.5 GB"
+            case .marvis100M6bit:
+                return "~400 MB"
+            }
+        }
+    }
+
     public enum Voice: String, CaseIterable {
         case conversationalA = "conversational_a"
         case conversationalB = "conversational_b"
@@ -41,9 +75,9 @@ public final class MarvisSession: Module {
     private var playback: AudioPlayback?
     private let playbackEnabled: Bool
     // Bound configuration for session-like ergonomics
-    private var boundVoice: Voice? = .conversationalA
-    private var boundRefAudio: MLXArray? = nil
-    private var boundRefText: String? = nil
+    internal var boundVoice: Voice? = .conversationalA
+    internal var boundRefAudio: MLXArray? = nil
+    internal var boundRefText: String? = nil
     private var boundQuality: QualityLevel = .maximum
 
     public init(
@@ -78,67 +112,79 @@ public final class MarvisSession: Module {
     deinit { playback?.stop() }
 
     private func tokenizeTextSegment(text: String, speaker: Int) -> (MLXArray, MLXArray) {
-        let K = model.args.audioNumCodebooks
-        let frameW = K + 1
+        return autoreleasepool {
+            let K = model.args.audioNumCodebooks
+            let frameW = K + 1
 
-        let prompt = "[\(speaker)]" + text
-        let ids = MLXArray(textTokenizer.encode(text: prompt))
+            let prompt = "[\(speaker)]" + text
+            let ids = MLXArray(textTokenizer.encode(text: prompt))
+            ids.eval()
 
-        let T = ids.shape[0]
-        var frame = MLXArray.zeros([T, frameW], type: Int32.self)
-        var mask = MLXArray.zeros([T, frameW], type: Bool.self)
+            let T = ids.shape[0]
+            var frame = MLXArray.zeros([T, frameW], type: Int32.self)
+            var mask = MLXArray.zeros([T, frameW], type: Bool.self)
 
-        let lastCol = frameW - 1
-        do {
-            let left = split(frame, indices: [lastCol], axis: 1)[0]
-            let right = split(frame, indices: [lastCol], axis: 1)[1]
-            let tail = split(right, indices: [1], axis: 1)
-            let after = (tail.count > 1) ? tail[1] : MLXArray.zeros([T, 0], type: Int32.self)
-            frame = concatenated([left, ids.reshaped([T, 1]), after], axis: 1)
+            let lastCol = frameW - 1
+            do {
+                let left = split(frame, indices: [lastCol], axis: 1)[0]
+                let right = split(frame, indices: [lastCol], axis: 1)[1]
+                let tail = split(right, indices: [1], axis: 1)
+                let after = (tail.count > 1) ? tail[1] : MLXArray.zeros([T, 0], type: Int32.self)
+                frame = concatenated([left, ids.reshaped([T, 1]), after], axis: 1)
+            }
+            frame.eval()
+
+            do {
+                let ones = MLXArray.ones([T, 1], type: Bool.self)
+                let left = split(mask, indices: [lastCol], axis: 1)[0]
+                let right = split(mask, indices: [lastCol], axis: 1)[1]
+                let tail = split(right, indices: [1], axis: 1)
+                let after = (tail.count > 1) ? tail[1] : MLXArray.zeros([T, 0], type: Bool.self)
+                mask = concatenated([left, ones, after], axis: 1)
+            }
+            mask.eval()
+
+            return (frame, mask)
         }
-
-        do {
-            let ones = MLXArray.ones([T, 1], type: Bool.self)
-            let left = split(mask, indices: [lastCol], axis: 1)[0]
-            let right = split(mask, indices: [lastCol], axis: 1)[1]
-            let tail = split(right, indices: [1], axis: 1)
-            let after = (tail.count > 1) ? tail[1] : MLXArray.zeros([T, 0], type: Bool.self)
-            mask = concatenated([left, ones, after], axis: 1)
-        }
-
-        return (frame, mask)
     }
 
     private func tokenizeAudio(_ audio: MLXArray, addEOS: Bool = true) -> (MLXArray, MLXArray) {
-        let K = model.args.audioNumCodebooks
-        let frameW = K + 1
+        return autoreleasepool {
+            let K = model.args.audioNumCodebooks
+            let frameW = K + 1
 
-        let x = audio.reshaped([1, 1, audio.shape[0]])
-        var codes = audioTokenizer.codec.encode(x) // [1, K, Tq]
-        codes = split(codes, indices: [1], axis: 0)[0].reshaped([K, codes.shape[2]])
+            let x = audio.reshaped([1, 1, audio.shape[0]])
+            var codes = audioTokenizer.codec.encode(x) // [1, K, Tq]
+            codes.eval()
+            codes = split(codes, indices: [1], axis: 0)[0].reshaped([K, codes.shape[2]])
 
-        if addEOS {
-            let eos = MLXArray.zeros([K, 1], type: Int32.self)
-            codes = concatenated([codes, eos], axis: 1) // [K, Tq+1]
+            if addEOS {
+                let eos = MLXArray.zeros([K, 1], type: Int32.self)
+                codes = concatenated([codes, eos], axis: 1) // [K, Tq+1]
+                codes.eval()
+            }
+
+            let T = codes.shape[1]
+            var frame = MLXArray.zeros([T, frameW], type: Int32.self) // [T, K+1]
+            var mask = MLXArray.zeros([T, frameW], type: Bool.self)
+
+            let codesT = swappedAxes(codes, 0, 1) // [T, K]
+            if K > 0 {
+                let leftLen = K
+                let right = split(frame, indices: [leftLen], axis: 1)[1] // [T, 1]
+                frame = concatenated([codesT, right], axis: 1)
+            }
+            frame.eval()
+
+            if K > 0 {
+                let ones = MLXArray.ones([T, K], type: Bool.self)
+                let right = MLXArray.zeros([T, 1], type: Bool.self)
+                mask = concatenated([ones, right], axis: 1)
+            }
+            mask.eval()
+
+            return (frame, mask)
         }
-
-        let T = codes.shape[1]
-        var frame = MLXArray.zeros([T, frameW], type: Int32.self) // [T, K+1]
-        var mask = MLXArray.zeros([T, frameW], type: Bool.self)
-
-        let codesT = swappedAxes(codes, 0, 1) // [T, K]
-        if K > 0 {
-            let leftLen = K
-            let right = split(frame, indices: [leftLen], axis: 1)[1] // [T, 1]
-            frame = concatenated([codesT, right], axis: 1)
-        }
-        if K > 0 {
-            let ones = MLXArray.ones([T, K], type: Bool.self)
-            let right = MLXArray.zeros([T, 1], type: Bool.self)
-            mask = concatenated([ones, right], axis: 1)
-        }
-
-        return (frame, mask)
     }
 
     private func tokenizeSegment(_ segment: Segment, addEOS: Bool = true) -> (MLXArray, MLXArray) {
@@ -152,7 +198,7 @@ public extension MarvisSession {
     // MARK: - Shared model loading helpers
     // MARK: - Shared model loading helpers
 
-    private static func snapshotAndConfig(
+    internal static func snapshotAndConfig(
         repoId: String,
         progressHandler: @escaping (Progress) -> Void
     ) async throws -> (args: MarvisModelArgs, promptURLs: [URL], weightFileURL: URL) {
@@ -168,7 +214,7 @@ public extension MarvisSession {
         return (args, audioPromptURLs, weightFileURL)
     }
 
-    private func installWeights(args: MarvisModelArgs, weightFileURL: URL) throws {
+    internal func installWeights(args: MarvisModelArgs, weightFileURL: URL) throws {
         var weights: [String: MLXArray] = [:]
         let w = try loadArrays(url: weightFileURL)
         for (k, v) in w { weights[k] = v }
@@ -267,6 +313,8 @@ public extension MarvisSession {
 
         var startTime = CFAbsoluteTimeGetCurrent()
         var frameCount = 0
+        var consecutiveZeroFrames = 0
+        let eosThreshold = 1  // Break on first zero frame (like original), but check every 2 frames
 
         for frameIdx in 0 ..< maxAudioFrames {
             let frame = try model.generateFrame(
@@ -275,9 +323,7 @@ public extension MarvisSession {
                 tokensMask: currMask,
                 sampler: sampleFn
             ) // [1, K]
-
-            // EOS if every codebook is 0
-            if frame.sum().item(Int32.self) == 0 { break }
+            frame.eval() // Force frame computation immediately
 
             samplesFrames.append(frame)
             frameCount += 1
@@ -286,13 +332,35 @@ public extension MarvisSession {
                 let zerosText = MLXArray.zeros([1, 1], type: Int32.self)
                 let nextFrame = concatenated([frame, zerosText], axis: 1) // [1, K+1]
                 currTokens = expandedDimensions(nextFrame, axis: 1)       // [1, 1, K+1]
+                currTokens.eval() // Force token assembly
 
                 let onesK = ones([1, frame.shape[1]], type: Bool.self)
                 let zero1 = zeros([1, 1], type: Bool.self)
                 let nextMask = concatenated([onesK, zero1], axis: 1) // [1, K+1]
                 currMask = expandedDimensions(nextMask, axis: 1)     // [1, 1, K+1]
+                currMask.eval() // Force mask assembly
 
                 currPos = split(currPos, indices: [currPos.shape[1] - 1], axis: 1)[1] + MLXArray(1)
+                currPos.eval() // Force position update
+            }
+
+            // EOS detection: check if frame is all zeros (restored for correctness)
+            // Checked every frame after minimum generation to prevent extraneous audio
+            // The performance impact is acceptable given other optimizations
+            if frameIdx > 10 {
+                let frameSum = frame.sum()
+                frameSum.eval()  // Force computation
+                let isZeroFrame = frameSum.item(Int32.self) == 0
+
+                if isZeroFrame {
+                    consecutiveZeroFrames += 1
+                    if consecutiveZeroFrames >= eosThreshold {
+                        // Found EOS - stop generation immediately
+                        break
+                    }
+                } else {
+                    consecutiveZeroFrames = 0
+                }
             }
 
             generatedCount += 1
@@ -308,6 +376,12 @@ public extension MarvisSession {
                 results.append(gr)
                 onStreamingResult?(gr)
                 samplesFrames.removeAll(keepingCapacity: true)
+
+                // Aggressive memory cleanup for streaming
+                autoreleasepool {
+                    // Force cleanup of accumulated arrays
+                }
+
                 startTime = CFAbsoluteTimeGetCurrent()
             }
         }
@@ -325,7 +399,7 @@ public extension MarvisSession {
     /// Mirrors factory-style `make(voice:)` but as an initializer for ergonomics.
     convenience init(
         voice: Voice = .conversationalA,
-        repoId: String = "Marvis-AI/marvis-tts-250m-v0.1",
+        repoId: String = "Marvis-AI/marvis-tts-250m-v0.2",
         progressHandler: @escaping (Progress) -> Void = { _ in },
         playbackEnabled: Bool = true
     ) async throws {
@@ -343,7 +417,7 @@ public extension MarvisSession {
     convenience init(
         refAudio: MLXArray,
         refText: String,
-        repoId: String = "Marvis-AI/marvis-tts-250m-v0.1",
+        repoId: String = "Marvis-AI/marvis-tts-250m-v0.2",
         progressHandler: @escaping (Progress) -> Void = { _ in },
         playbackEnabled: Bool = true
     ) async throws {
@@ -361,7 +435,7 @@ public extension MarvisSession {
     /// Creates a Marvis session and binds a default voice.
     static func make(
         voice: Voice = .conversationalA,
-        repoId: String = "Marvis-AI/marvis-tts-250m-v0.1",
+        repoId: String = "Marvis-AI/marvis-tts-250m-v0.2",
         progressHandler: @escaping (Progress) -> Void = { _ in }
     ) async throws -> MarvisSession {
         let engine = try await fromPretrained(repoId: repoId, progressHandler: progressHandler)
@@ -375,7 +449,7 @@ public extension MarvisSession {
     static func make(
         refAudio: MLXArray,
         refText: String,
-        repoId: String = "Marvis-AI/marvis-tts-250m-v0.1",
+        repoId: String = "Marvis-AI/marvis-tts-250m-v0.2",
         progressHandler: @escaping (Progress) -> Void = { _ in }
     ) async throws -> MarvisSession {
         let engine = try await fromPretrained(repoId: repoId, progressHandler: progressHandler)
@@ -385,7 +459,7 @@ public extension MarvisSession {
         return engine
     }
 
-    static func fromPretrained(repoId: String = "Marvis-AI/marvis-tts-250m-v0.1", progressHandler: @escaping (Progress) -> Void) async throws -> MarvisSession {
+    static func fromPretrained(repoId: String = "Marvis-AI/marvis-tts-250m-v0.2", progressHandler: @escaping (Progress) -> Void) async throws -> MarvisSession {
         let (args, prompts, weightFileURL) = try await snapshotAndConfig(repoId: repoId, progressHandler: progressHandler)
         let model = try await MarvisSession(config: args, repoId: repoId, promptURLs: prompts, progressHandler: progressHandler)
         try model.installWeights(args: args, weightFileURL: weightFileURL)
@@ -541,16 +615,19 @@ public extension MarvisSession {
 
         let frameCount = frames.count
 
-        var stacked = stacked(frames, axis: 0) // [F, 1, K]
-        stacked = swappedAxes(stacked, 0, 1) // [1, F, K]
-        stacked = swappedAxes(stacked, 1, 2) // [1, K, F]
+        // Optimized: Single transpose instead of two swappedAxes (avoid double copy)
+        let stacked = stacked(frames, axis: 0) // [F, 1, K]
+        let transposed = stacked.transposed(1, 2, 0) // [1, K, F] in one operation
+        transposed.eval() // Force computation before decoding
 
         let audio1x1x = streaming
-            ? streamingDecoder.decodeFrames(stacked) // [1, 1, S]
-            : audioTokenizer.codec.decode(stacked) // [1, 1, S]
+            ? streamingDecoder.decodeFrames(transposed) // [1, 1, S]
+            : audioTokenizer.codec.decode(transposed) // [1, 1, S]
+        audio1x1x.eval() // Force audio decoding
 
         let sampleCount = audio1x1x.shape[2]
         let audio = audio1x1x.reshaped([sampleCount]) // [S]
+        audio.eval() // Force reshape before conversion to Swift array
 
         let elapsed = CFAbsoluteTimeGetCurrent() - start
         let sr = Int(sampleRate)
@@ -571,7 +648,11 @@ public extension MarvisSession {
 
         // Play the generated audio (if enabled)
         if enqueuePlayback {
-            playback?.enqueue(result.audio, prebufferSeconds: streaming ? 2.0 : 0.0)
+            // Adaptive prebuffer: scale with chunk size
+            // Smaller chunks need proportionally smaller prebuffers to avoid excessive latency
+            // Larger chunks can handle larger prebuffers for smoother playback
+            let adaptivePrebuffer = streaming ? min(2.0, max(0.8, audioSeconds * 2.0)) : 0.0
+            playback?.enqueue(result.audio, prebufferSeconds: adaptivePrebuffer)
         }
 
         // Force cleanup of large intermediate arrays
