@@ -15,7 +15,7 @@ from mlx_lm.convert import mixed_quant_predicate_builder
 from mlx_lm.utils import dequantize_model, quantize_model, save_config, save_model
 from transformers import AutoConfig
 
-MODEL_REMAPPING = {"outetts": "outetts", "spark": "spark", "sam": "sesame"}
+MODEL_REMAPPING = {"outetts": "outetts", "spark": "spark", "csm": "sesame"}
 MAX_FILE_SIZE_GB = 5
 MODEL_CONVERSION_DTYPES = ["float16", "bfloat16", "float32"]
 
@@ -48,6 +48,8 @@ def get_model_path(path_or_hf_repo: str, revision: Optional[str] = None) -> Path
                     "*.txt",
                     "*.jsonl",
                     "*.yaml",
+                    "*.wav",
+                    "*.txt",
                 ],
             )
         )
@@ -399,7 +401,15 @@ def convert(
     mlx_path.mkdir(parents=True, exist_ok=True)
 
     # Copy Python and JSON files from the model path to the MLX path
-    for pattern in ["*.py", "*.json", "*.wav", "*.pt", "*.safetensors", "*.yaml"]:
+    for pattern in [
+        "*.py",
+        "*.json",
+        "*.wav",
+        "*.pt",
+        "*.safetensors",
+        "*.yaml",
+        "*.txt",
+    ]:
         files = glob.glob(str(model_path / pattern))
         for file in files:
             shutil.copy(file, mlx_path)
